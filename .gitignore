@@ -155,7 +155,28 @@ htmlcov/
 # Documentation
 docs/_build/
 
-# MyPy
-.mypy_cache/
-.dmypy.json
-dmypy.json
+# Test and development files
+test_*.json
+*_working.*
+*_debug.*
+*_clean.*
+*_backup.*
+*_simple.*
+*_apple.*
+*_final.*
+*_fixed.*
+start.py
+fix_*.ps1
+*.ps1
+
+# Configuration files (keeping only essential ones)
+postcss.config.js
+tailwind.config.js
+
+# CSS files (using inline styles)
+*.css
+!*.min.css
+
+# Multiple app versions
+App*.jsx
+!App_final_fixed.jsx
