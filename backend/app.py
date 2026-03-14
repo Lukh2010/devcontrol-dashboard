@@ -13,6 +13,43 @@ CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://loc
 def root():
     return jsonify({"message": "DevControl Dashboard API"})
 
+@app.route("/docs")
+def api_docs():
+    """API Documentation endpoint"""
+    docs = {
+        "title": "DevControl Dashboard API",
+        "version": "1.0.0",
+        "description": "REST API for DevControl Dashboard",
+        "endpoints": {
+            "/": "API Root - Returns API information",
+            "/docs": "This API documentation",
+            "/api/system/info": "Get system information (CPU, memory, platform)",
+            "/api/system/performance": "Get real-time performance metrics",
+            "/api/processes": "Get running processes with CPU and memory usage",
+            "/api/ports": "Get active network ports and listening services",
+            "/api/network/info": "Get network interface information",
+            "/api/network/ping": "Ping a host (POST with hostname)",
+            "/api/commands/run": "Execute system command (POST with command)"
+        },
+        "methods": {
+            "GET": "Retrieve data",
+            "POST": "Submit data/execute commands"
+        },
+        "examples": {
+            "ping_command": {
+                "url": "/api/network/ping",
+                "method": "POST",
+                "body": {"hostname": "google.com"}
+            },
+            "run_command": {
+                "url": "/api/commands/run", 
+                "method": "POST",
+                "body": {"command": "dir", "name": "List Directory"}
+            }
+        }
+    }
+    return jsonify(docs)
+
 @app.route("/api/system/info")
 def get_system_info():
     """Get basic system information"""
