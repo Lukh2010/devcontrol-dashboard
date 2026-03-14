@@ -180,3 +180,4 @@ tailwind.config.js
 # Multiple app versions
 App*.jsx
 !App_final_fixed.jsx
+.windsurfrules
