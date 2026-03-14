@@ -144,7 +144,7 @@ devcontrol-dashboard/
 │   │   │   ├── CommandRunner_Apple.jsx    # Apple-styled Command Runner
 │   │   │   ├── NetworkHub_Apple.jsx        # Apple-styled Network Hub
 │   │   │   └── ProcessMonitor_Apple.jsx   # Apple-styled Process Monitor
-│   │   ├── App_final_fixed.jsx              # Hauptkomponente mit echten Daten
+│   │   ├── App_final.jsx              # Hauptkomponente mit echten Daten
 │   │   ├── App_demo.jsx                   # Demo-Komponente (sicher)
 │   │   └── main.jsx                     # Entry Point
 │   ├── package.json
