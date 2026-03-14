@@ -11,7 +11,19 @@ A reliable dashboard that provides essential control over your development envir
 - **Node.js 16+** - Frontend development server
 - **npm** - Package manager
 
-### Manual Setup (Recommended)
+### One-Command Launch (Recommended)
+```bash
+python start.py
+```
+
+This script will:
+- ✅ Check all dependencies (Python, Node.js, npm)
+- 📦 Install required packages automatically
+- 🚀 Start both backend and frontend servers
+- 🌐 Open your dashboard at `http://localhost:3000`
+- 📊 Monitor server status with graceful shutdown
+
+### Manual Setup (Advanced)
 ```bash
 # Backend Setup
 cd backend
@@ -54,6 +66,13 @@ npm run dev
 - **Safe command execution** with security filters
 - **Command history** with results
 - **Real-time output display**
+
+### 💻 **Live Terminal**
+- **Interactive terminal** with real-time command execution
+- **Command history** with arrow key navigation
+- **Copy/Clear/Stop** functionality
+- **Auto-scroll** and colored output
+- **Full-width terminal** experience in browser
 
 ### � **Network Hub**
 - **Network interface monitoring**
@@ -364,9 +383,9 @@ Your DevControl Dashboard is now ready for deployment!
 - 📚 **Documentation**: `http://localhost:8000/docs`
 
 **Next Steps:**
-1. Start backend with `cd backend && python app.py`
-2. Start frontend with `cd frontend && npm run dev`
-3. Explore all dashboard features
+1. Launch with `python start.py` (recommended)
+2. Or start servers manually as shown above
+3. Explore all dashboard features including the new Live Terminal
 4. Monitor your development environment like a pro!
 
 *Built with precision for developers who demand control.* ⚡
