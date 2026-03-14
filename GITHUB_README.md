@@ -127,7 +127,7 @@ Dieses Dashboard zeigt **echte Systemdaten** an:
 ```bash
 # Sicherer Demo-Modus ohne persönliche Daten
 python backend/app_demo.py
-# Frontend auf App_demo.jsx umstellen
+# Frontend auf App_demo.jsx umstellen (main.jsx ändern)
 ```
 
 ## 📋 Projektstruktur
@@ -279,8 +279,7 @@ cd devcontrol-dashboard
 # Oder Windows: start_devcontrol.bat
 ```
 
-### **3️⃣ Browser öffnen:**
-**http://localhost:3001**
+### **3️⃣ Browser🌐 Frontend: http://localhost:30000**
 
 ---
 

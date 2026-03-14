@@ -179,5 +179,6 @@ tailwind.config.js
 
 # Multiple app versions
 App*.jsx
-!App_final_fixed.jsx
+!App_final.jsx
+!App_demo.jsx
 .windsurfrules
