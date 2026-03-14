@@ -1,8 +1,8 @@
 # 🎮 DevControl Dashboard
 
-**Military-Grade System Monitoring & Control Center**
+**Stable System Monitoring & Control Center**
 
-A powerful fullstack dashboard that provides complete control over your development environment with real-time monitoring, port management, process control, and network analysis.
+A reliable dashboard that provides essential control over your development environment with system monitoring, port management, process control, and network analysis.
 
 ## 🚀 Quick Start
 
@@ -11,23 +11,12 @@ A powerful fullstack dashboard that provides complete control over your developm
 - **Node.js 16+** - Frontend development server
 - **npm** - Package manager
 
-### One-Command Launch
-```bash
-python start.py
-```
-
-This single command will:
-- ✅ Check all dependencies
-- 📦 Install required packages automatically
-- 🚀 Start both backend and frontend servers
-- 🌐 Open your dashboard at `http://localhost:3000`
-
-### Manual Setup (Advanced)
+### Manual Setup (Recommended)
 ```bash
 # Backend Setup
 cd backend
-pip install -r requirements.txt
-python main.py
+pip install flask flask-cors psutil python-multipart
+python app.py
 
 # Frontend Setup (in separate terminal)
 cd frontend
@@ -35,12 +24,16 @@ npm install
 npm run dev
 ```
 
+### Access Points
+- 🌐 **Dashboard**: `http://localhost:3000`
+- 🔧 **Backend API**: `http://localhost:8000`
+- 📚 **API Documentation**: `http://localhost:8000/docs`
+
 ## 🎯 Features
 
 ### 🔧 **System Monitor**
-- **Real-time CPU & RAM monitoring** with live charts
+- **Real-time CPU & RAM monitoring** with live updates
 - **Disk usage tracking** and alerts
-- **WebSocket updates** every 2 seconds
 - **Performance history** visualization
 - **Resource threshold warnings**
 
@@ -49,51 +42,31 @@ npm run dev
 - **One-click process termination** (Kill functionality)
 - **Service recognition** for common ports
 - **Security warnings** for system-critical ports
-- **Real-time port monitoring**
 
 ### ⚡ **Process Monitor**
 - **Live process tracking** with CPU/Memory usage
 - **Sorting and filtering** capabilities
 - **Resource-intensive process alerts**
 - **Process status indicators**
-- **Top consumers analysis**
 
 ### 🖥️ **Command Runner**
 - **Custom command library** management
 - **Safe command execution** with security filters
 - **Command history** with results
-- **Quick command templates**
 - **Real-time output display**
 
-### 📡 **Network Hub**
+### � **Network Hub**
 - **Network interface monitoring**
 - **Latency testing** with ping functionality
 - **Gateway detection**
 - **Connection status indicators**
-- **Quick ping targets**
-
-## 🎨 Design Philosophy
-
-### Military-Grade Dark Mode
-- **Tactical color scheme**: Dark grays with tactical green/orange accents
-- **Grid-based layout** reminiscent of control centers
-- **Sharp, high-contrast interfaces** for clarity
-- **Status indicators** with color-coded warnings
-- **Monospace fonts** for technical precision
-
-### User Experience
-- **Responsive design** adapts to any screen size
-- **Real-time updates** without page refreshes
-- **Intuitive navigation** with clear sectioning
-- **Visual feedback** for all actions
-- **Performance optimized** for minimal resource usage
 
 ## 🏗️ Architecture
 
-### Backend (Python FastAPI)
+### Backend (Python Flask)
 ```
 backend/
-├── main.py              # FastAPI application entry point
+├── app.py              # Flask application entry point
 ├── requirements.txt     # Python dependencies
 └── api/
     ├── system.py        # System monitoring endpoints
@@ -114,7 +87,7 @@ frontend/
 │   │   ├── CommandRunner.jsx
 │   │   └── NetworkHub.jsx
 │   ├── App.jsx         # Main application
-│   └── index.css       # Military-grade styling
+│   └── index.css       # Styling
 ├── package.json        # Node.js dependencies
 └── tailwind.config.js  # TailwindCSS configuration
 ```
@@ -124,7 +97,6 @@ frontend/
 ### System Information
 - `GET /api/system/info` - Basic system details
 - `GET /api/system/performance` - Real-time performance data
-- `WS /ws/performance` - WebSocket for live updates
 
 ### Port Management
 - `GET /api/ports` - List active ports and processes
@@ -139,6 +111,104 @@ frontend/
 ### Network Analysis
 - `GET /api/network/info` - Network interface information
 - `POST /api/network/ping` - Test host latency
+
+## 🔒 Security Features
+
+### Command Execution Safety
+- **Dangerous command detection** and blocking
+- **Input sanitization** for all user inputs
+- **Timeout protection** for long-running commands
+- **Process isolation** for command execution
+
+### Port Control Safety
+- **Warning system** for critical system ports
+- **Process verification** before termination
+- **Logging** of all port control actions
+
+## 🛠️ Configuration
+
+### Environment Variables
+```bash
+# Backend (optional)
+BACKEND_HOST=0.0.0.0
+BACKEND_PORT=8000
+
+# Frontend (optional)
+VITE_API_URL=http://localhost:8000
+```
+
+### Customization
+- **Color scheme**: Modify `frontend/src/index.css`
+- **Component layout**: Edit `frontend/src/App.jsx`
+- **API endpoints**: Update `backend/app.py`
+- **Security rules**: Modify command filters in backend
+
+## 📊 Performance Metrics
+
+### System Requirements
+- **RAM**: Minimum 512MB free
+- **CPU**: Low impact monitoring
+- **Disk**: <100MB total storage
+- **Network**: Local connections only
+
+### Monitoring Frequency
+- **System performance**: Every 2 seconds
+- **Port scanning**: Every 5 seconds
+- **Process list**: Every 3 seconds
+- **Network info**: Every 10 seconds
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+**Backend won't start**
+```bash
+# Check Python version
+python --version
+
+# Install dependencies manually
+cd backend
+pip install flask flask-cors psutil python-multipart
+```
+
+**Frontend won't start**
+```bash
+# Check Node.js version
+node --version
+
+# Clear npm cache
+npm cache clean --force
+cd frontend
+rm -rf node_modules package-lock.json
+npm install
+```
+
+**Port conflicts**
+```bash
+# Kill processes on ports 3000 and 8000
+# Use the dashboard's Port Control feature
+# Or manually:
+netstat -ano | findstr :3000
+netstat -ano | findstr :8000
+```
+
+**Permission errors**
+- **Windows**: Run as Administrator
+- **Linux/macOS**: Use `sudo` if needed for system commands
+
+## 🚀 Development
+
+### Adding New Features
+1. **Backend**: Add new endpoints in `backend/app.py`
+2. **Frontend**: Create components in `frontend/src/components/`
+3. **Styling**: Use TailwindCSS classes in components
+4. **API**: Update API documentation in backend
+
+### Code Style
+- **Python**: Follow PEP 8 guidelines
+- **JavaScript**: Use ES6+ features
+- **CSS**: TailwindCSS utility-first approach
+- **Components**: Functional React with hooks
 
 ## 🔒 Security Features
 
@@ -294,9 +364,9 @@ Your DevControl Dashboard is now ready for deployment!
 - 📚 **Documentation**: `http://localhost:8000/docs`
 
 **Next Steps:**
-1. Launch with `python start.py`
-2. Explore all dashboard features
-3. Customize commands and settings
+1. Start backend with `cd backend && python app.py`
+2. Start frontend with `cd frontend && npm run dev`
+3. Explore all dashboard features
 4. Monitor your development environment like a pro!
 
 *Built with precision for developers who demand control.* ⚡
