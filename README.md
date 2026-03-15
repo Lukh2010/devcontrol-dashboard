@@ -1,8 +1,8 @@
-# 🎮 DevControl Dashboard
+# � DevControl Dashboard
 
-**Stable System Monitoring & Control Center**
+**Modern Apple-Style System Monitoring & Control Center**
 
-A reliable dashboard that provides essential control over your development environment with system monitoring, port management, process control, and network analysis.
+A sleek, modern dashboard that provides essential control over your development environment with Apple-inspired design, real-time system monitoring, port management, process control, and network analysis.
 
 ## 🚀 Quick Start
 
@@ -20,7 +20,7 @@ This script will:
 - ✅ Check all dependencies (Python, Node.js, npm)
 - 📦 Install required packages automatically
 - 🚀 Start both backend and frontend servers
-- 🌐 Open your dashboard at `http://localhost:3000`
+- 🌐 Open your dashboard at `http://localhost:5173`
 - 📊 Monitor server status with graceful shutdown
 
 ### Manual Setup (Advanced)
@@ -37,7 +37,7 @@ npm run dev
 ```
 
 ### Access Points
-- 🌐 **Dashboard**: `http://localhost:3000`
+- 🌐 **Dashboard**: `http://localhost:5173` (Vite Development Server)
 - 🔧 **Backend API**: `http://localhost:8000`
 - 📚 **API Documentation**: `http://localhost:8000/docs`
 
@@ -55,65 +55,86 @@ npm run dev
 - **Service recognition** for common ports
 - **Security warnings** for system-critical ports
 
-### ⚡ **Process Monitor**
+### Process Monitor
 - **Live process tracking** with CPU/Memory usage
 - **Sorting and filtering** capabilities
 - **Resource-intensive process alerts**
 - **Process status indicators**
 
-### 🖥️ **Command Runner**
+### Command Runner
 - **Custom command library** management
 - **Safe command execution** with security filters
 - **Command history** with results
 - **Real-time output display**
 
-### 💻 **Live Terminal**
-- **Interactive terminal** with real-time command execution
+### Window Terminal
+- **Interactive terminal** with real-time WebSocket communication
+- **Window-style interface** with macOS-inspired design
 - **Command history** with arrow key navigation
 - **Copy/Clear/Stop** functionality
+- **Sudo protection** for dangerous commands
 - **Auto-scroll** and colored output
 - **Full-width terminal** experience in browser
+- **WebSocket connection** on port 8002 with auto-reconnect
 
-### � **Network Hub**
-- **Network interface monitoring**
-- **Latency testing** with ping functionality
-- **Gateway detection**
-- **Connection status indicators**
+### Network Hub
+- Network interface monitoring with detailed IP information
+- Advanced latency testing with ping functionality
+- Quick target buttons for fast testing
+- Gateway detection and hostname display
+- Connection status indicators with live updates
 
-## 🏗️ Architecture
+## Design System
+
+### Apple-Inspired UI
+- Clean, minimal interface with Apple-style aesthetics
+- Consistent color palette (#007aff blue, #28ca42 green, #ff5f57 red)
+- Modern typography with -apple-system font stack
+- Smooth animations and hover effects
+- Card-based layout with subtle shadows and borders
+
+### Component Architecture
+```
+frontend/src/components/
+├── SystemMonitor.jsx    # Performance metrics with progress bars
+├── PortControl.jsx       # Port management with clean tables
+├── ProcessMonitor.jsx    # Process tracking with status indicators
+├── WindowTerminal.jsx    # Window-style terminal with WebSocket
+└── NetworkHub.jsx        # Network analysis with ping tools
+```
+
+## Architecture
 
 ### Backend (Python Flask)
 ```
 backend/
-├── app.py              # Flask application entry point
-├── requirements.txt     # Python dependencies
-└── api/
-    ├── system.py        # System monitoring endpoints
-    ├── ports.py         # Port control endpoints
-    ├── processes.py     # Process monitoring
-    ├── commands.py      # Command execution
-    └── network.py       # Network analysis
+├── app.py                    # Flask application with WebSocket server
+├── requirements.txt           # Python dependencies
+├── terminal_session.py       # Terminal session management
+└── WebSocket server on port 8002
 ```
 
 ### Frontend (React + Vite)
 ```
 frontend/
 ├── src/
-│   ├── components/      # React components
+│   ├── components/            # React components with inline styles
 │   │   ├── SystemMonitor.jsx
 │   │   ├── PortControl.jsx
 │   │   ├── ProcessMonitor.jsx
-│   │   ├── CommandRunner.jsx
+│   │   ├── WindowTerminal.jsx
 │   │   └── NetworkHub.jsx
-│   ├── App.jsx         # Main application
-│   └── index.css       # Styling
-├── package.json        # Node.js dependencies
-└── tailwind.config.js  # TailwindCSS configuration
+│   ├── App.jsx               # Main application with Apple-style design
+│   └── index.css             # Modern CSS styling
+├── package.json              # Node.js dependencies
+└── Vite development server
 ```
 
-## 📡 API Endpoints
+## API Endpoints
 
 ### System Information
+- GET /api/system/info - Basic system details
+- GET /api/system/performance - Real-time performance data
 - `GET /api/system/info` - Basic system details
 - `GET /api/system/performance` - Real-time performance data
 
@@ -131,13 +152,13 @@ frontend/
 - `GET /api/network/info` - Network interface information
 - `POST /api/network/ping` - Test host latency
 
-## 🔒 Security Features
+### WebSocket Terminal
+- `ws://localhost:8003` - Real-time terminal communication
+- **Auto-reconnect** functionality on connection loss
+- **Session management** with unique session IDs
+- **Command filtering** for security protection
 
-### Command Execution Safety
-- **Dangerous command detection** and blocking
-- **Input sanitization** for all user inputs
-- **Timeout protection** for long-running commands
-- **Process isolation** for command execution
+## Security Features
 
 ### Port Control Safety
 - **Warning system** for critical system ports
@@ -157,10 +178,11 @@ VITE_API_URL=http://localhost:8000
 ```
 
 ### Customization
-- **Color scheme**: Modify `frontend/src/index.css`
+- **Color scheme**: Modify component inline styles in `frontend/src/components/`
 - **Component layout**: Edit `frontend/src/App.jsx`
 - **API endpoints**: Update `backend/app.py`
 - **Security rules**: Modify command filters in backend
+- **Apple-style theme**: Adjust colors and spacing in component styles
 
 ## 📊 Performance Metrics
 
@@ -175,6 +197,7 @@ VITE_API_URL=http://localhost:8000
 - **Port scanning**: Every 5 seconds
 - **Process list**: Every 3 seconds
 - **Network info**: Every 10 seconds
+- **Terminal WebSocket**: Real-time bidirectional communication
 
 ## 🔧 Troubleshooting
 
@@ -303,11 +326,25 @@ npm install
 
 **Port conflicts**
 ```bash
-# Kill processes on ports 3000 and 8000
+# Kill processes on ports 5173, 8000, and 8003
 # Use the dashboard's Port Control feature
 # Or manually:
-netstat -ano | findstr :3000
+netstat -ano | findstr :5173
 netstat -ano | findstr :8000
+netstat -ano | findstr :8003
+```
+
+**Terminal WebSocket disconnected**
+```bash
+# Check if WebSocket server is running on port 8003
+netstat -ano | findstr :8003
+
+# If too many connections are stuck, restart backend
+# The terminal should auto-reconnect when backend restarts
+
+# Clear stuck connections (Windows)
+taskkill /F /PID <backend_process_id>
+python start.py
 ```
 
 **Permission errors**
@@ -373,19 +410,29 @@ For issues and questions:
 
 ---
 
-## 🎮 Mission Complete
+## 🍎 Mission Complete
 
-Your DevControl Dashboard is now ready for deployment! 
+Your Apple-Style DevControl Dashboard is now ready for deployment! 
 
 **Access Points:**
-- 🌐 **Dashboard**: `http://localhost:3000`
-- 🔧 **API**: `http://localhost:8000`
-- 📚 **Documentation**: `http://localhost:8000/docs`
+- 🌐 **Dashboard**: `http://localhost:5173`
+- 🔧 **Backend API**: `http://localhost:8000`
+- 📚 **API Documentation**: `http://localhost:8000/docs`
+- 💻 **WebSocket Terminal**: `ws://localhost:8003`
 
 **Next Steps:**
 1. Launch with `python start.py` (recommended)
 2. Or start servers manually as shown above
-3. Explore all dashboard features including the new Live Terminal
-4. Monitor your development environment like a pro!
+3. Explore all dashboard features including the Window Terminal
+4. Experience the modern Apple-style interface
+5. Monitor your development environment like a pro!
 
-*Built with precision for developers who demand control.* ⚡
+**Key Features:**
+- ✅ **Apple-inspired design** with clean, modern interface
+- ✅ **Real-time WebSocket terminal** with window-style UI
+- ✅ **Advanced network monitoring** with ping tools
+- ✅ **Comprehensive system monitoring** with live updates
+- ✅ **Secure command execution** with sudo protection
+- ⚠️ **Terminal WebSocket** on port 8003 (may need restart if disconnected)
+
+*Built with precision for developers who demand control and style.* 🍎⚡

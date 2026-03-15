@@ -5,9 +5,60 @@ import socket
 import subprocess
 import platform
 import time
+import asyncio
+import websockets
+import json
+import threading
+from terminal_session import TerminalSessionManager
 
 app = Flask(__name__)
 CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"])
+
+# Terminal session manager
+terminal_manager = TerminalSessionManager()
+
+# WebSocket server
+async def handle_websocket(websocket, path):
+    """Handle WebSocket connections for terminal sessions"""
+    try:
+        session_id = await terminal_manager.create_session(websocket)
+        
+        async for message in websocket:
+            try:
+                data = json.loads(message)
+                await terminal_manager.handle_message(session_id, data)
+            except json.JSONDecodeError:
+                await websocket.send(json.dumps({
+                    'type': 'error',
+                    'message': 'Invalid JSON message'
+                }))
+            except Exception as e:
+                await websocket.send(json.dumps({
+                    'type': 'error',
+                    'message': f'Error handling message: {str(e)}'
+                }))
+                
+    except websockets.exceptions.ConnectionClosed:
+        pass
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+    finally:
+        if 'session_id' in locals():
+            await terminal_manager.close_session(session_id)
+
+def start_websocket_server():
+    """Start WebSocket server in separate thread"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    start_server = websockets.serve(handle_websocket, "localhost", 8003)
+    loop.run_until_complete(start_server)
+    print(" WebSocket Terminal: ws://localhost:8003")
+    loop.run_forever()
+
+# Start WebSocket server in background thread
+websocket_thread = threading.Thread(target=start_websocket_server, daemon=True)
+websocket_thread.start()
 
 @app.route("/")
 def root():
