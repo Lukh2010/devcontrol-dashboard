@@ -57,7 +57,7 @@ const PortControl = () => {
 
   useEffect(() => {
     fetchPorts();
-    const interval = setInterval(fetchPorts, 5000); // Refresh every 5 seconds
+    const interval = setInterval(fetchPorts, 12000); // Refresh every 12 seconds (less frequent)
     return () => clearInterval(interval);
   }, []);
 

@@ -81,7 +81,7 @@ const ProcessMonitor = () => {
 
   useEffect(() => {
     fetchProcesses();
-    const interval = setInterval(fetchProcesses, 3000); // Refresh every 3 seconds
+    const interval = setInterval(fetchProcesses, 8000); // Refresh every 8 seconds (less frequent)
     return () => clearInterval(interval);
   }, []);
 

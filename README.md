@@ -417,7 +417,7 @@ For issues and questions:
 Your Apple-Style DevControl Dashboard is now ready for deployment! 
 
 **Access Points:**
-- 🌐 **Dashboard**: `http://localhost:5173`
+- 🌐 **Dashboard**: `http://localhost:3000`
 - 🔧 **Backend API**: `http://localhost:8000`
 - 📚 **API Documentation**: `http://localhost:8000/docs`
 - 💻 **WebSocket Terminal**: `ws://localhost:8003`
@@ -431,10 +431,20 @@ Your Apple-Style DevControl Dashboard is now ready for deployment!
 
 **Key Features:**
 - ✅ **Apple-inspired design** with clean, modern interface
-- ✅ **Real-time WebSocket terminal** with window-style UI
+- ✅ **Real-time WebSocket terminal** with direct command execution
 - ✅ **Advanced network monitoring** with ping tools
-- ✅ **Comprehensive system monitoring** with live updates
+- ✅ **Comprehensive system monitoring** with optimized performance
+- ✅ **Process monitoring** with accurate CPU percentages
 - ✅ **Secure command execution** with sudo protection
 - ✅ **Terminal WebSocket** on port 8003 with enhanced debugging and auto-reconnect
+- ✅ **Optimized refresh rates** for better performance
+
+**Performance Optimizations:**
+- ⚡ **System Monitor**: 4-second refresh intervals
+- ⚡ **Process Monitor**: 8-second refresh with fast CPU values
+- ⚡ **Port Control**: 12-second refresh intervals
+- ⚡ **Network Hub**: 20-second refresh intervals
+- ⚡ **Fast CPU measurement** without delays
+- ⚡ **Optimized API calls** for better performance
 
 *Built with precision for developers who demand control and style.* 🍎⚡

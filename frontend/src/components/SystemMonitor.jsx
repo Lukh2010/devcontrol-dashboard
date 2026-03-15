@@ -69,8 +69,8 @@ const SystemMonitor = () => {
     // Initial data fetch
     fetchPerformanceData();
 
-    // Poll for updates every 2 seconds (replacing WebSocket)
-    const interval = setInterval(fetchPerformanceData, 2000);
+    // Poll for updates every 4 seconds (less frequent)
+    const interval = setInterval(fetchPerformanceData, 4000);
 
     return () => {
       clearInterval(interval);

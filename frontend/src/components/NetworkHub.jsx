@@ -216,7 +216,7 @@ const NetworkHub = () => {
 
   useEffect(() => {
     fetchNetworkInfo();
-    const interval = setInterval(fetchNetworkInfo, 10000);
+    const interval = setInterval(fetchNetworkInfo, 20000); // Refresh every 20 seconds (less frequent)
     return () => clearInterval(interval);
   }, []);
 
