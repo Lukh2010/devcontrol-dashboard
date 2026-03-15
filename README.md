@@ -339,12 +339,14 @@ netstat -ano | findstr :8003
 # Check if WebSocket server is running on port 8003
 netstat -ano | findstr :8003
 
-# If too many connections are stuck, restart backend
-# The terminal should auto-reconnect when backend restarts
+# If too many connections are stuck, kill old processes
+taskkill /F /PID <old_process_id>
+taskkill /F /PID <websocket_process_id>
 
-# Clear stuck connections (Windows)
-taskkill /F /PID <backend_process_id>
+# Then restart backend
 python start.py
+
+# Terminal should auto-reconnect with enhanced debugging
 ```
 
 **Permission errors**
@@ -433,6 +435,6 @@ Your Apple-Style DevControl Dashboard is now ready for deployment!
 - ✅ **Advanced network monitoring** with ping tools
 - ✅ **Comprehensive system monitoring** with live updates
 - ✅ **Secure command execution** with sudo protection
-- ⚠️ **Terminal WebSocket** on port 8003 (may need restart if disconnected)
+- ✅ **Terminal WebSocket** on port 8003 with enhanced debugging and auto-reconnect
 
 *Built with precision for developers who demand control and style.* 🍎⚡

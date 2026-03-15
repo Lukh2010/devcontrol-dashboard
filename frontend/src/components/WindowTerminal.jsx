@@ -87,6 +87,7 @@ const WindowTerminal = () => {
         break;
         
       case 'output':
+        console.log('Received output:', message.data);
         addOutput({ type: 'output', text: message.data });
         break;
         
@@ -115,10 +116,6 @@ const WindowTerminal = () => {
         addOutput({ type: 'system', text: message.message, className: 'text-yellow-400' });
         break;
         
-      case 'interrupt_sent':
-        addOutput({ type: 'system', text: message.message, className: 'text-yellow-400' });
-        break;
-        
       case 'error':
         addOutput({ type: 'error', text: message.message, className: 'text-red-400' });
         break;
@@ -133,17 +130,38 @@ const WindowTerminal = () => {
   };
 
   const sendCommand = (command) => {
-    if (!ws || !connected || !command.trim()) return;
+    if (!ws || !connected) {
+      console.log('Cannot send command - WebSocket not connected');
+      addOutput({ type: 'error', text: 'Terminal not connected. Please wait...' });
+      return;
+    }
+    
+    if (!command.trim()) {
+      console.log('Empty command - not sending');
+      return;
+    }
+    
+    console.log('Sending command:', command);
     
     // Add to history
     setHistory(prev => [...prev, { command, timestamp: Date.now() }].slice(-50));
     setHistoryIndex(-1);
     
-    // Send command
-    ws.send(JSON.stringify({
-      type: 'execute_command',
-      command: command
-    }));
+    // Add command to output
+    addOutput({ type: 'command', text: `$ ${command}` });
+    
+    try {
+      // Send command
+      ws.send(JSON.stringify({
+        type: 'execute_command',
+        command: command
+      }));
+      
+      console.log('Command sent successfully');
+    } catch (error) {
+      console.error('Failed to send command:', error);
+      addOutput({ type: 'error', text: `Failed to send command: ${error.message}` });
+    }
     
     setCurrentCommand('');
   };

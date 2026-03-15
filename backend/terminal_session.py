@@ -49,45 +49,23 @@ class TerminalSession:
     async def start_session(self):
         """Start terminal session with shell"""
         try:
-            # Start shell process (Windows compatible)
-            shell_command = 'cmd.exe' if platform.system() == 'Windows' else '/bin/bash'
-            
-            if PTY_AVAILABLE and platform.system() != 'Windows':
-                # Use PTY for Unix systems
-                self.process = PtyProcessUnicode.spawn(
-                    [shell_command],
-                    cwd=self.working_dir,
-                    env=os.environ.copy()
-                )
-            else:
-                # Use subprocess for Windows or fallback
-                self.process = subprocess.Popen(
-                    [shell_command],
-                    cwd=self.working_dir,
-                    env=os.environ.copy(),
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=0,
-                    universal_newlines=True
-                )
+            print("Starting simple terminal session...")
             
             self.is_running = True
             
             # Send welcome message
             await self.send_message({
                 'type': 'welcome',
-                'message': f'Terminal session started in {self.working_dir}',
+                'message': f'Terminal session ready in {self.working_dir}',
                 'working_dir': self.working_dir,
                 'session_id': self.session_id,
-                'pty_available': PTY_AVAILABLE
+                'pty_available': False
             })
             
-            # Start output reader
-            asyncio.create_task(self.read_output())
+            print(f"Terminal session started: {self.session_id}")
             
         except Exception as e:
+            print(f"Error starting terminal session: {e}")
             await self.send_message({
                 'type': 'error',
                 'message': f'Failed to start terminal: {str(e)}'
@@ -153,34 +131,51 @@ class TerminalSession:
     async def _execute_command_internal(self, command: str, classification: str):
         """Internal command execution"""
         try:
-            # Send command to terminal
-            if self.process:
-                if PTY_AVAILABLE and hasattr(self.process, 'isalive') and self.process.isalive():
-                    # PTY process
-                    self.process.write(command + '\n')
-                else:
-                    # Subprocess
-                    self.process.stdin.write(command + '\n')
-                    self.process.stdin.flush()
-                
+            print(f"Executing command: {command}")
+            
+            # Execute command directly and get output
+            import subprocess
+            result = subprocess.run(
+                command,
+                shell=True,
+                cwd=self.working_dir,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            # Send command confirmation
+            await self.send_message({
+                'type': 'command_sent',
+                'command': command,
+                'classification': classification
+            })
+            
+            # Send output
+            if result.stdout:
                 await self.send_message({
-                    'type': 'command_sent',
-                    'command': command,
-                    'classification': classification
+                    'type': 'output',
+                    'data': result.stdout,
+                    'timestamp': time.time()
                 })
-                
-                # For non-interactive commands, we might want to wait for completion
-                if classification != 'interactive':
-                    # Give some time for command to execute
-                    await asyncio.sleep(0.5)
-                
-            else:
+            
+            # Send error output if any
+            if result.stderr:
                 await self.send_message({
-                    'type': 'error',
-                    'message': 'Terminal process not available'
+                    'type': 'output',
+                    'data': f"ERROR: {result.stderr}",
+                    'timestamp': time.time()
                 })
+            
+            print(f"Command executed: {command}, Return code: {result.returncode}")
                 
+        except subprocess.TimeoutExpired:
+            await self.send_message({
+                'type': 'error',
+                'message': 'Command execution timed out'
+            })
         except Exception as e:
+            print(f"Error executing command: {e}")
             await self.send_message({
                 'type': 'error',
                 'message': f'Failed to execute command: {str(e)}'
@@ -217,58 +212,8 @@ class TerminalSession:
     
     async def read_output(self):
         """Read output from terminal process"""
-        while self.is_running and self.process:
-            try:
-                output = None
-                
-                if PTY_AVAILABLE and hasattr(self.process, 'isalive') and self.process.isalive():
-                    # PTY process
-                    if self.process.read():
-                        output = self.process.read()
-                elif hasattr(self.process, 'poll') and self.process.poll() is None:
-                    # Subprocess - non-blocking read
-                    try:
-                        # Use select for non-blocking read on Unix
-                        import select
-                        if hasattr(select, 'select'):
-                            ready, _, _ = select.select([self.process.stdout], [], [], 0.1)
-                            if ready:
-                                output = self.process.stdout.read(1024)
-                        else:
-                            # Windows fallback - small blocking read with timeout
-                            output = self.process.stdout.read(1)
-                            if output:
-                                # Try to read more if available
-                                try:
-                                    while True:
-                                        more = self.process.stdout.read(1)
-                                        if not more:
-                                            break
-                                        output += more
-                                except:
-                                    pass
-                    except:
-                        # Fallback for Windows
-                        try:
-                            output = self.process.stdout.readline()
-                        except:
-                            pass
-                
-                if output:
-                    await self.send_message({
-                        'type': 'output',
-                        'data': output,
-                        'timestamp': time.time()
-                    })
-                
-                await asyncio.sleep(0.1)  # Small delay to prevent busy loop
-                
-            except Exception as e:
-                await self.send_message({
-                    'type': 'error',
-                    'message': f'Output reading error: {str(e)}'
-                })
-                break
+        # No continuous output reader needed for simple command execution
+        pass
     
     async def resize_terminal(self, cols: int, rows: int):
         """Resize terminal"""
