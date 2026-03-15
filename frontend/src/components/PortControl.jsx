@@ -1,5 +1,54 @@
 import React, { useState, useEffect } from 'react';
-import { Network, AlertTriangle, CheckCircle, XCircle, Kill } from 'lucide-react';
+import { Network } from 'lucide-react';
+
+const styles = {
+  card: {
+    backgroundColor: '#ffffff',
+    borderRadius: '12px',
+    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.07)',
+    border: '1px solid rgba(0, 0, 0, 0.1)',
+    marginBottom: '20px'
+  },
+  cardHeader: {
+    padding: '16px 20px',
+    borderBottom: '1px solid rgba(0, 0, 0, 0.1)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  cardTitle: {
+    fontSize: '18px',
+    fontWeight: '600',
+    color: '#1d1d1f',
+    margin: 0,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
+  },
+  cardContent: {
+    padding: '20px'
+  },
+  table: {
+    width: '100%',
+    borderCollapse: 'collapse'
+  },
+  tableCell: {
+    padding: '12px 16px',
+    textAlign: 'left',
+    borderBottom: '1px solid rgba(0, 0, 0, 0.05)',
+    fontSize: '13px'
+  },
+  button: {
+    backgroundColor: '#ff5f57',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '6px 12px',
+    fontSize: '12px',
+    fontWeight: '500',
+    cursor: 'pointer'
+  }
+};
 
 const PortControl = () => {
   const [ports, setPorts] = useState([]);
@@ -8,13 +57,13 @@ const PortControl = () => {
 
   useEffect(() => {
     fetchPorts();
-    const interval = setInterval(fetchPorts, 5000); // Refresh every 5 seconds
+    const interval = setInterval(fetchPorts, 12000); // Refresh every 12 seconds (less frequent)
     return () => clearInterval(interval);
   }, []);
 
   const fetchPorts = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/ports');
+      const response = await fetch('/api/ports');
       const data = await response.json();
       setPorts(data);
       setLoading(false);
@@ -26,7 +75,7 @@ const PortControl = () => {
 
   const killProcess = async (port) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/port/${port}`, {
+      const response = await fetch(`/api/port/${port}`, {
         method: 'DELETE'
       });
       
@@ -59,14 +108,14 @@ const PortControl = () => {
 
   if (loading) {
     return (
-      <div className="panel">
-        <div className="panel-header">
-          <h2 className="panel-title flex items-center">
-            <Network className="w-4 h-4 mr-2" />
-            PORT CONTROL
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <h2 style={styles.cardTitle}>
+            <Network style={{width: '20px', height: '20px'}} />
+            Port Control
           </h2>
         </div>
-        <div className="p-4 text-center text-military-400">
+        <div style={styles.cardContent}>
           Scanning ports...
         </div>
       </div>
@@ -74,110 +123,49 @@ const PortControl = () => {
   }
 
   return (
-    <div className="panel">
-      <div className="panel-header">
-        <h2 className="panel-title flex items-center">
-          <Network className="w-4 h-4 mr-2" />
-          PORT CONTROL
+    <div style={styles.card}>
+      <div style={styles.cardHeader}>
+        <h2 style={styles.cardTitle}>
+          <Network style={{width: '20px', height: '20px'}} />
+          Port Control
         </h2>
-        <div className="flex items-center space-x-2">
-          <div className="w-2 h-2 bg-tactical-green rounded-full animate-pulse"></div>
-          <span className="text-xs text-tactical-green">{ports.length} ACTIVE</span>
-        </div>
       </div>
-
-      {message && (
-        <div className={`mx-4 mt-4 p-2 border text-xs font-bold ${
-          message.includes('✓') 
-            ? 'bg-green-900 border-green-700 text-green-300' 
-            : 'bg-red-900 border-red-700 text-red-300'
-        }`}>
-          {message}
-        </div>
-      )}
-
-      <div className="p-4">
+      <div style={styles.cardContent}>
         {ports.length === 0 ? (
-          <div className="text-center py-8">
-            <XCircle className="w-12 h-12 text-military-600 mx-auto mb-2" />
-            <div className="text-military-400 text-sm">No active listening ports found</div>
+          <div style={{textAlign: 'center', padding: '40px 0', color: '#6c757d'}}>
+            No active listening ports found
           </div>
         ) : (
-          <div className="space-y-2">
-            <div className="grid grid-cols-5 gap-2 text-xs font-bold text-tactical-green border-b border-military-700 pb-2">
-              <div>PORT</div>
-              <div>PROCESS</div>
-              <div>PID</div>
-              <div>SERVICE</div>
-              <div>ACTION</div>
-            </div>
-            
-            {ports.map((portInfo, index) => (
-              <div 
-                key={index} 
-                className="data-row border-b border-military-800"
-              >
-                <div className="flex items-center space-x-2">
-                  <div className="w-2 h-2 bg-tactical-green rounded-full"></div>
-                  <span className="font-bold text-tactical-green">{portInfo.port}</span>
-                </div>
-                <div className="text-military-100 font-mono text-xs truncate">
-                  {portInfo.process_name}
-                </div>
-                <div className="text-military-400 text-xs">
-                  {portInfo.pid}
-                </div>
-                <div className="text-xs">
-                  <span className="px-2 py-1 bg-military-800 border border-military-600 text-military-300">
-                    {getPortStatus(portInfo.port)}
-                  </span>
-                </div>
-                <div>
-                  <button
-                    onClick={() => killProcess(portInfo.port)}
-                    className="btn-danger flex items-center space-x-1"
-                    title={`Kill process on port ${portInfo.port}`}
-                  >
-                    <Kill className="w-3 h-3" />
-                    <span>KILL</span>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th style={styles.tableCell}>Port</th>
+                <th style={styles.tableCell}>Process</th>
+                <th style={styles.tableCell}>PID</th>
+                <th style={styles.tableCell}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ports.slice(0, 10).map((portInfo, index) => (
+                <tr key={index}>
+                  <td style={styles.tableCell}>
+                    <strong>{portInfo.port}</strong>
+                  </td>
+                  <td style={styles.tableCell}>{portInfo.process_name}</td>
+                  <td style={styles.tableCell}>{portInfo.pid}</td>
+                  <td style={styles.tableCell}>
+                    <button
+                      onClick={() => killProcess(portInfo.port)}
+                      style={styles.button}
+                    >
+                      Kill
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
-
-        <div className="mt-6 p-3 bg-military-800 border border-military-700">
-          <div className="flex items-center space-x-2 mb-2">
-            <AlertTriangle className="w-4 h-4 text-tactical-orange" />
-            <div className="text-xs font-bold text-tactical-orange">WARNING</div>
-          </div>
-          <div className="text-xs text-military-400">
-            Terminating processes can cause data loss or system instability. 
-            Use with caution and ensure you understand what each process does before killing it.
-          </div>
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <div className="bg-military-800 border border-military-700 p-3">
-            <div className="text-xs font-bold text-tactical-green mb-2">COMMON PORTS</div>
-            <div className="space-y-1 text-xs text-military-400">
-              <div>80/443 - Web Servers</div>
-              <div>3000/8000 - Development</div>
-              <div>5432 - PostgreSQL</div>
-              <div>3306 - MySQL</div>
-            </div>
-          </div>
-          <div className="bg-military-800 border border-military-700 p-3">
-            <div className="text-xs font-bold text-tactical-green mb-2">SYSTEM STATUS</div>
-            <div className="space-y-1 text-xs text-military-400">
-              <div>Total Ports: {ports.length}</div>
-              <div>High Risk: {ports.filter(p => p.port < 1024).length}</div>
-              <div>Dev Ports: {ports.filter(p => p.port >= 3000 && p.port <= 9000).length}</div>
-              <div>Last Scan: Just now</div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );

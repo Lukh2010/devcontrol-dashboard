@@ -5,9 +5,91 @@ import socket
 import subprocess
 import platform
 import time
+import asyncio
+import websockets
+import json
+import threading
+from terminal_session import TerminalSessionManager
 
 app = Flask(__name__)
 CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"])
+
+# Terminal session manager
+terminal_manager = TerminalSessionManager()
+
+# Global CPU measurement cache
+cpu_cache = {}
+last_cpu_update = 0
+
+def update_cpu_cache():
+    """Update global CPU measurement cache"""
+    global cpu_cache, last_cpu_update
+    import time
+    
+    current_time = time.time()
+    if current_time - last_cpu_update < 1.0:  # Update every 1 second
+        return
+    
+    try:
+        # Initialize CPU measurement
+        psutil.cpu_percent(interval=0.1)
+        
+        # Get CPU for all processes
+        new_cache = {}
+        for proc in psutil.process_iter(['pid']):
+            try:
+                cpu_percent = proc.cpu_percent()
+                new_cache[proc.pid] = cpu_percent
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                new_cache[proc.pid] = 0
+        
+        cpu_cache = new_cache
+        last_cpu_update = current_time
+    except Exception as e:
+        print(f"Error updating CPU cache: {e}")
+
+# WebSocket server
+async def handle_websocket(websocket, path):
+    """Handle WebSocket connections for terminal sessions"""
+    try:
+        session_id = await terminal_manager.create_session(websocket)
+        
+        async for message in websocket:
+            try:
+                data = json.loads(message)
+                await terminal_manager.handle_message(session_id, data)
+            except json.JSONDecodeError:
+                await websocket.send(json.dumps({
+                    'type': 'error',
+                    'message': 'Invalid JSON message'
+                }))
+            except Exception as e:
+                await websocket.send(json.dumps({
+                    'type': 'error',
+                    'message': f'Error handling message: {str(e)}'
+                }))
+                
+    except websockets.exceptions.ConnectionClosed:
+        pass
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+    finally:
+        if 'session_id' in locals():
+            await terminal_manager.close_session(session_id)
+
+def start_websocket_server():
+    """Start WebSocket server in separate thread"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    start_server = websockets.serve(handle_websocket, "localhost", 8003)
+    loop.run_until_complete(start_server)
+    print(" WebSocket Terminal: ws://localhost:8003")
+    loop.run_forever()
+
+# Start WebSocket server in background thread
+websocket_thread = threading.Thread(target=start_websocket_server, daemon=True)
+websocket_thread.start()
 
 @app.route("/")
 def root():
@@ -103,19 +185,22 @@ def get_system_performance():
 def get_processes():
     """Get running processes with CPU and memory usage"""
     try:
-        # Get CPU count once for proper calculation
-        cpu_count = psutil.cpu_count()
+        # Update CPU cache if needed
+        update_cpu_cache()
+        
         processes = []
         
-        for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_info', 'status']):
+        # Get all processes with their info
+        for proc in psutil.process_iter(['pid', 'name', 'memory_info', 'status']):
             try:
                 pinfo = proc.info
-                # Get CPU percentage per process (already normalized by psutil)
-                cpu_percent = pinfo['cpu_percent'] or 0
+                
+                # Get CPU from cache
+                cpu_percent = cpu_cache.get(proc.pid, 0)
                 memory_mb = pinfo['memory_info'].rss / 1024 / 1024 if pinfo['memory_info'] else 0
                 
-                # Skip System Idle Process and processes with 0 CPU
-                if pinfo['name'] and pinfo['name'] != 'System Idle Process' and cpu_percent > 0:
+                # Skip System Idle Process
+                if pinfo['name'] and pinfo['name'] != 'System Idle Process':
                     processes.append({
                         "pid": pinfo['pid'],
                         "name": pinfo['name'] or 'Unknown',
@@ -126,9 +211,9 @@ def get_processes():
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
         
-        # Sort by CPU usage and return top 20
+        # Sort by CPU usage and return top 15
         processes.sort(key=lambda x: x['cpu_percent'], reverse=True)
-        return jsonify(processes[:20])
+        return jsonify(processes[:15])
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
