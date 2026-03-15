@@ -78,18 +78,53 @@ async def handle_websocket(websocket, path):
             await terminal_manager.close_session(session_id)
 
 def start_websocket_server():
-    """Start WebSocket server in separate thread"""
+    """Start WebSocket server in a separate thread"""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
-    start_server = websockets.serve(handle_websocket, "localhost", 8003)
-    loop.run_until_complete(start_server)
-    print(" WebSocket Terminal: ws://localhost:8003")
-    loop.run_forever()
+    try:
+        start_server = websockets.serve(handle_websocket, "localhost", 8003)
+        loop.run_until_complete(start_server)
+        print("WebSocket terminal server started on ws://localhost:8003")
+        loop.run_forever()
+    except OSError as e:
+        if "address already in use" in str(e).lower() or "10048" in str(e):
+            print("WebSocket port 8003 already in use, continuing without WebSocket terminal...")
+        else:
+            raise e
 
-# Start WebSocket server in background thread
-websocket_thread = threading.Thread(target=start_websocket_server, daemon=True)
-websocket_thread.start()
+# Start WebSocket server in background thread only if not already running
+import threading
+import time
+
+def start_websocket_if_not_running():
+    """Start WebSocket server only if not already running"""
+    # Check if port 8003 is already in use by our own process
+    try:
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        result = sock.connect_ex(('localhost', 8003))
+        sock.close()
+        
+        if result == 0:
+            # Port is already in use, don't start another WebSocket server
+            print("WebSocket server already running, skipping...")
+            return
+        
+        # Port is free, start WebSocket server
+        websocket_thread = threading.Thread(target=start_websocket_server, daemon=True)
+        websocket_thread.start()
+        print("WebSocket server thread started")
+        
+    except Exception as e:
+        print(f"Error checking WebSocket port: {e}")
+        # Try to start anyway
+        websocket_thread = threading.Thread(target=start_websocket_server, daemon=True)
+        websocket_thread.start()
+
+# Start WebSocket server with delay to avoid conflicts
+timer = threading.Timer(2.0, start_websocket_if_not_running)
+timer.start()
 
 @app.route("/")
 def root():
@@ -272,13 +307,40 @@ def run_command():
         if any(dangerous in command.lower() for dangerous in dangerous_commands):
             return jsonify({"error": "Dangerous command detected"}), 400
         
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
+        import shlex
+        
+        # Execute command safely
+        if platform.system() == 'Windows':
+            # On Windows, use shell=True for built-in commands but validate input
+            if any(cmd in command.lower() for cmd in ['del', 'rmdir', 'format', 'shutdown']):
+                return jsonify({"error": "Dangerous command blocked for security"}), 403
+            
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+        else:
+            # On Unix-like systems, avoid shell=True
+            try:
+                args = shlex.split(command)
+                result = subprocess.run(
+                    args,
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+            except ValueError:
+                # Fallback for complex commands
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
         
         return jsonify({
             "command": command,
@@ -402,4 +464,4 @@ def ping_host():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    app.run(host="0.0.0.0", port=8000, debug=False)
