@@ -1,0 +1,25 @@
+@echo off
+echo Starting DevControl Dashboard as Administrator...
+echo.
+cd /d "%~dp0\.."
+echo Checking administrator privileges...
+net session >nul 2>&1
+if %errorLevel% == 0 (
+    echo [OK] Running as Administrator
+    echo.
+    echo Starting dashboard with admin privileges...
+    echo Press Ctrl+C to stop (will clean up automatically)
+    echo.
+    cmd /c "python start.py"
+    echo.
+    echo [STOP] Dashboard stopped, running cleanup...
+    call tools\cleanup_ports.bat
+    echo [OK] All processes cleaned up
+) else (
+    echo [ERROR] Not running as Administrator!
+    echo Please right-click this file and select "Run as administrator"
+    echo.
+    pause
+)
+echo.
+echo [EXIT] Exiting...

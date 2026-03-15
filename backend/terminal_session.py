@@ -135,14 +135,73 @@ class TerminalSession:
             
             # Execute command directly and get output
             import subprocess
-            result = subprocess.run(
-                command,
-                shell=True,
-                cwd=self.working_dir,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
+            import shlex
+            
+            # Split command safely to avoid shell injection
+            if platform.system() == 'Windows':
+                # On Windows, use shell=True for built-in commands but validate input
+                if any(cmd in command.lower() for cmd in ['del', 'rmdir', 'format', 'shutdown']):
+                    await self.send_message({
+                        'type': 'error',
+                        'message': 'Dangerous command blocked for security'
+                    })
+                    return
+                
+                # Handle admin commands on Windows - check if running as admin
+                admin_commands = ['net sess', 'net session', 'net user', 'net localgroup', 'net share']
+                if any(cmd in command.lower() for cmd in admin_commands):
+                    # Check if running as administrator
+                    try:
+                        import ctypes
+                        is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+                        if not is_admin:
+                            await self.send_message({
+                                'type': 'error',
+                                'message': 'Administrator privileges required. Please run the dashboard as Administrator (right-click → Run as administrator)'
+                            })
+                            return
+                        else:
+                            # Running as admin, allow the command
+                            await self.send_message({
+                                'type': 'info',
+                                'message': '🔑 Executing admin command with elevated privileges...'
+                            })
+                    except:
+                        # If we can't check, try the command anyway with warning
+                        await self.send_message({
+                            'type': 'warning',
+                            'message': '⚠️ Could not verify admin privileges, trying command anyway...'
+                        })
+                
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    cwd=self.working_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+            else:
+                # On Unix-like systems, avoid shell=True
+                try:
+                    args = shlex.split(command)
+                    result = subprocess.run(
+                        args,
+                        cwd=self.working_dir,
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
+                except ValueError:
+                    # Fallback for complex commands
+                    result = subprocess.run(
+                        command,
+                        shell=True,
+                        cwd=self.working_dir,
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
             
             # Send command confirmation
             await self.send_message({
