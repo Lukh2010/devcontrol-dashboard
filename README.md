@@ -1,4 +1,4 @@
-# � DevControl Dashboard
+# 🎮 DevControl Dashboard
 
 **Modern Apple-Style System Monitoring & Control Center**
 
