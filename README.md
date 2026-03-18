@@ -34,6 +34,21 @@ For system administrator commands like `net sess`, run with elevated privileges:
 2. **Navigate to project**: `cd path/to/your/devcontrol-dashboard`
 3. **Run dashboard**: `python start.py`
 
+### Linux Start
+For Linux systems, use the dedicated start script:
+
+**Method 1: Start Script (Recommended)**
+```bash
+chmod +x scripts/start_linux.sh
+./scripts/start_linux.sh
+```
+
+This script will:
+- ✅ Start backend and frontend in background
+- ✅ Save PIDs for clean shutdown
+- ✅ Show local network IP for mobile access
+- ✅ Open browser automatically
+
 ## 📁 Project Structure
 
 ```

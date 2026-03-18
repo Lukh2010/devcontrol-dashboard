@@ -21,7 +21,7 @@ const WindowTerminal = () => {
     const connectWebSocket = () => {
       try {
         console.log('Connecting to WebSocket on ws://localhost:8003...');
-        const websocket = new WebSocket('ws://localhost:8003');
+        const websocket = new WebSocket(`ws://${window.location.hostname}:8003`);
         
         websocket.onopen = () => {
           console.log('WebSocket connected successfully!');
