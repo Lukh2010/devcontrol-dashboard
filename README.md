@@ -11,16 +11,21 @@ A sleek, modern dashboard that provides essential control over your development 
 - **Node.js 16+** - Frontend development server
 - **npm** - Package manager
 
-### One-Command Launch (Recommended)
+### Quick Start
+
+Choose your platform-specific script below for the best experience:
+
+#### Windows
 ```bash
-python start.py
+# Run as Administrator for full functionality
+start_admin.bat
 ```
 
-This script will:
-- ✅ Check all dependencies (Python, Node.js, npm)
-- 📦 Install required packages automatically
-- 🚀 Start both backend and frontend servers
-- 🌐 Open your dashboard at `http://localhost:3000`
+#### Linux
+```bash
+# Full-featured start script with PID management
+./scripts/start_linux.sh
+```
 
 ### Admin Commands (Windows)
 For system administrator commands like `net sess`, run with elevated privileges:
@@ -28,11 +33,6 @@ For system administrator commands like `net sess`, run with elevated privileges:
 **Method 1: Batch File (Easiest)**
 1. **Right-click `start_admin.bat`** → "Run as administrator"
 2. **Dashboard starts automatically** with admin rights
-
-**Method 2: PowerShell (Admin)**
-1. **Right-click Start Menu** → "Windows PowerShell (Admin)"
-2. **Navigate to project**: `cd path/to/your/devcontrol-dashboard`
-3. **Run dashboard**: `python start.py`
 
 ### Linux Start
 For Linux systems, use the dedicated start script:
@@ -54,8 +54,7 @@ This script will:
 ```
 devcontrol-dashboard/
 ├── 📄 README.md                 # Main documentation
-├── 🚀 start.py                 # Main launcher script
-├── 🔧 start_admin.bat          # Windows admin launcher
+├──  start_admin.bat          # Windows admin launcher
 ├── 📁 backend/                 # Flask API server
 │   ├── 📄 app.py               # Main Flask application
 │   └── 📄 terminal_session.py  # WebSocket terminal handler
@@ -67,10 +66,9 @@ devcontrol-dashboard/
 │   ├── 🧹 cleanup_ports.bat    # Windows port cleanup
 │   ├── 🧹 cleanup_ports.py     # Python port cleanup
 │   ├── 🧹 cleanup_ports.sh     # Unix port cleanup
-│   └── 🔧 start_admin.sh       # Unix admin launcher
-├── 📁 docs/                    # Documentation
-│   └── 🔒 SECURITY.md          # Security documentation
-└── 📁 scripts/                 # Setup scripts
+│   └── 🔧 start_admin.bat      # Windows admin launcher
+├── 📁 scripts/                 # Setup scripts
+│   └── 🔧 start_linux.sh       # Linux start script
 ```
 
 ## 🌐 Features
@@ -100,12 +98,17 @@ devcontrol-dashboard/
 - Right-click → "Run as administrator"
 
 **"Dependencies not found"**
-- The `start.py` script installs dependencies automatically
+- Install dependencies manually:
+  ```bash
+  cd backend && pip install -r requirements.txt
+  cd frontend && npm install
+  ```
 - Make sure Python and Node.js are in your PATH
 
-**Dashboard won't start**
+**"Dashboard won't start"**
 - Check if ports 3000, 8000, or 8003 are occupied
 - Run the cleanup script and try again
+- If issues persist, try restarting your system
 
 ### Port Cleanup
 
@@ -115,7 +118,7 @@ devcontrol-dashboard/
 tools\cleanup_ports.bat
 ```
 
-**macOS/Linux:**
+**Linux:**
 ```bash
 # Make executable and run:
 chmod +x tools/cleanup_ports.sh
@@ -133,10 +136,9 @@ This dashboard includes comprehensive security measures:
 - **Command validation** - Blocks dangerous system commands
 - **Input sanitization** - Prevents shell injection attacks
 - **Admin privilege checks** - Verifies administrator rights
-- **Local-only access** - No external network connections
+- **Home network access** - Accessible on LAN, not exposed to internet
 - **No data persistence** - No data is stored or transmitted
 
-For detailed security information, see [docs/SECURITY.md](docs/SECURITY.md).
 
 ## 📊 Performance
 
@@ -154,17 +156,12 @@ The dashboard is optimized for performance:
 - ✅ PowerShell compatibility
 - ✅ Process management
 
-### macOS
-- ✅ Full support with sudo commands
-- ✅ Shell script launchers
-- ✅ Terminal compatibility
-- ✅ Unix process management
-
 ### Linux
 - ✅ Full support with sudo commands
-- ✅ Shell script launchers
+- ✅ Shell script launchers (start_linux.sh)
 - ✅ Terminal compatibility
 - ✅ Unix process management
+- ✅ Mobile access with local IP detection
 
 ## 🤝 Contributing
 
