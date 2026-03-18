@@ -18,20 +18,20 @@ Choose your platform-specific script below for the best experience:
 #### Windows
 ```bash
 # Run as Administrator for full functionality
-start_admin.bat
+tools/start_windows.bat
 ```
 
 #### Linux
 ```bash
 # Full-featured start script with PID management
-./scripts/start_linux.sh
+./tools/start_linux.sh
 ```
 
 ### Admin Commands (Windows)
 For system administrator commands like `net sess`, run with elevated privileges:
 
 **Method 1: Batch File (Easiest)**
-1. **Right-click `start_admin.bat`** → "Run as administrator"
+1. **Right-click `tools/start_windows.bat`** → "Run as administrator"
 2. **Dashboard starts automatically** with admin rights
 
 ### Linux Start
@@ -39,8 +39,8 @@ For Linux systems, use the dedicated start script:
 
 **Method 1: Start Script (Recommended)**
 ```bash
-chmod +x scripts/start_linux.sh
-./scripts/start_linux.sh
+chmod +x tools/start_linux.sh
+./tools/start_linux.sh
 ```
 
 This script will:
@@ -54,7 +54,6 @@ This script will:
 ```
 devcontrol-dashboard/
 ├── 📄 README.md                 # Main documentation
-├──  start_admin.bat          # Windows admin launcher
 ├── 📁 backend/                 # Flask API server
 │   ├── 📄 app.py               # Main Flask application
 │   └── 📄 terminal_session.py  # WebSocket terminal handler
@@ -66,9 +65,8 @@ devcontrol-dashboard/
 │   ├── 🧹 cleanup_ports.bat    # Windows port cleanup
 │   ├── 🧹 cleanup_ports.py     # Python port cleanup
 │   ├── 🧹 cleanup_ports.sh     # Unix port cleanup
-│   └── 🔧 start_admin.bat      # Windows admin launcher
-├── 📁 scripts/                 # Setup scripts
-│   └── 🔧 start_linux.sh       # Linux start script
+│   ├── 🔧 start_windows.bat     # Windows launcher
+│   └── 🔧 start_linux.sh       # Linux launcher
 ```
 
 ## 🌐 Features
@@ -94,7 +92,7 @@ devcontrol-dashboard/
 - This will clean up ports 3000, 8000, and 8003
 
 **"Administrator privileges required"**
-- Run `start_admin.bat` as administrator
+- Run `tools/start_windows.bat` as administrator
 - Right-click → "Run as administrator"
 
 **"Dependencies not found"**
