@@ -129,7 +129,7 @@ const WindowTerminal = () => {
   };
 
   const sendCommand = (command) => {
-    if (!ws || !connected) {
+    if (!wsRef.current || !connected) {
       console.log('Cannot send command - WebSocket not connected');
       addOutput({ type: 'error', text: 'Terminal not connected. Please wait...' });
       return;

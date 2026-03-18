@@ -178,10 +178,15 @@ const ProcessManager = () => {
       const data = await response.json();
       setProcesses(data);
       
-      // Check if we have admin privileges by trying to access a protected endpoint
+      // Check admin privileges
       try {
-        const testResponse = await fetch('/api/system/info');
-        setIsAdmin(testResponse.ok);
+        const adminResponse = await fetch('/api/system/is-admin');
+        if (adminResponse.ok) {
+          const adminData = await adminResponse.json();
+          setIsAdmin(adminData.is_admin);
+        } else {
+          setIsAdmin(false);
+        }
       } catch {
         setIsAdmin(false);
       }

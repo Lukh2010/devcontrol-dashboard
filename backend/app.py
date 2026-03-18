@@ -9,10 +9,11 @@ import asyncio
 import websockets
 import json
 import threading
+import os
 from terminal_session import TerminalSessionManager
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"])
+CORS(app, origins="*")
 
 # Terminal session manager
 terminal_manager = TerminalSessionManager()
@@ -538,6 +539,33 @@ def kill_process(pid):
         return jsonify({"error": f"Process {pid} not found"}), 404
     except psutil.AccessDenied:
         return jsonify({"error": f"Access denied to process {pid}"}), 403
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/system/is-admin")
+def is_admin():
+    """Check if current user has administrator privileges"""
+    try:
+        if platform.system() == 'Windows':
+            try:
+                import ctypes
+                is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+                return jsonify({
+                    "is_admin": is_admin,
+                    "platform": platform.system()
+                })
+            except Exception as e:
+                return jsonify({
+                    "is_admin": False,
+                    "platform": platform.system(),
+                    "error": str(e)
+                })
+        else:
+            # Unix-like systems - check if running as root
+            return jsonify({
+                "is_admin": os.geteuid() == 0 if hasattr(os, 'geteuid') else False,
+                "platform": platform.system()
+            })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
