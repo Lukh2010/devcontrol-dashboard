@@ -171,6 +171,33 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **psutil** - System monitoring library
 - **Tailwind CSS** - Utility-first CSS framework
 
+## ⚠️ Sicherheit & Datenschutz (Privatnutzung)
+
+Dieses Dashboard ist ausschließlich für den Einsatz im privaten Heimnetz konzipiert. Folgende Sicherheitsaspekte sind bewusst vereinfacht:
+
+### Bekannte offene Punkte
+| Risiko | Auswirkung | Empfehlung |
+|--------|-----------|------------|
+| Keine Authentifizierung | Jeder im Heimnetz kann das Dashboard nutzen | Nur im eigenen WLAN betreiben |
+| API bindet auf 0.0.0.0 | Erreichbar von allen Netzwerkgeräten | Kein Port-Forwarding einrichten |
+| shell=True für Windows-Befehle | Bei manipuliertem Input möglich Command Injection | Nur vertrauenswürdige Personen ins Netz lassen |
+| Keine Rate Limits | Theoretisch DoS aus dem Heimnetz möglich | Irrelevant bei privatem Heimnetz |
+| Terminal hat Admin-Rechte | Befehle laufen mit vollen Systemrechten | Dashboard nicht im Büro oder öffentlichem WLAN starten |
+| Ping erlaubt private IPs | Netzwerk-Scan im Heimnetz möglich | Gewollt — für Router/NAS-Zugriff |
+| Process Kill UI | Prozesse können über UI gekillt werden | Nur mit Admin-Rechten nutzen |
+
+### Was NICHT passieren kann
+- ✅ Kein Internetzugriff auf das Dashboard (kein Port-Forwarding)
+- ✅ Keine Datenspeicherung oder -übertragung nach außen
+- ✅ Keine wirklich destruktiven Befehle (rm -rf /, format) werden ohne Bestätigung ausgeführt
+- ✅ Keine system-weiten Prozess-Kills (nur eigene Dashboard-Prozesse)
+
+### Empfohlene Nutzung
+- Im privaten Heimnetz mit WPA2/WPA3 WLAN
+- Nicht in öffentlichen Netzwerken starten
+- Nicht dauerhaft als Dienst/Autostart laufen lassen
+- Process Manager nur als Admin verwenden
+
 ---
 
 *Built with precision for developers who demand control and style.* 🍎⚡

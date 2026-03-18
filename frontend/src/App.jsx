@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Cpu, Network, Terminal, Wifi } from 'lucide-react';
+import { Activity, Cpu, Network, Terminal, Wifi, Settings } from 'lucide-react';
 import SystemMonitor from './components/SystemMonitor';
 import PortControl from './components/PortControl';
 import ProcessMonitor from './components/ProcessMonitor';
 import NetworkHub from './components/NetworkHub';
 import WindowTerminal from './components/WindowTerminal';
+import ProcessManager from './components/ProcessManager';
 
 const styles = {
   container: {
@@ -76,17 +77,27 @@ const styles = {
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
-    gap: '6px'
+    justifyContent: 'center',
+    gap: '6px',
+    minWidth: '44px',
+    minHeight: '44px',
+    touchAction: 'manipulation'
   },
   navButton: {
     backgroundColor: 'transparent',
     color: '#6c757d',
     border: 'none',
     borderRadius: '8px',
-    padding: '8px 12px',
+    padding: '10px 12px',
     fontSize: '14px',
     fontWeight: '500',
-    cursor: 'pointer'
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    minWidth: '44px',
+    minHeight: '44px',
+    touchAction: 'manipulation'
   },
   navButtonActive: {
     backgroundColor: '#007aff',
@@ -184,6 +195,7 @@ function App() {
               { id: 'overview', label: 'Overview', icon: Activity },
               { id: 'ports', label: 'Port Control', icon: Network },
               { id: 'processes', label: 'Processes', icon: Cpu },
+              { id: 'process-manager', label: 'Process Manager', icon: Settings },
               { id: 'commands', label: 'Terminal', icon: Terminal },
               { id: 'network', label: 'Network', icon: Wifi },
             ].map(({ id, label, icon: Icon }) => (
@@ -230,7 +242,7 @@ function App() {
         </div>
       )}
 
-      <div style={styles.grid2}>
+      <div style={activePanel === 'overview' ? styles.grid2 : {}}>
         {activePanel === 'overview' && (
           <>
             <SystemMonitor />
@@ -239,6 +251,7 @@ function App() {
         )}
         {activePanel === 'ports' && <PortControl />}
         {activePanel === 'processes' && <ProcessMonitor />}
+        {activePanel === 'process-manager' && <ProcessManager />}
         {activePanel === 'commands' && <WindowTerminal />}
         {activePanel === 'network' && <NetworkHub />}
       </div>

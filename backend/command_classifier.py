@@ -32,7 +32,7 @@ class CommandClassifier:
             r'sudo\s+chmod\s+777',    # Sudo dangerous permissions
             r'sudo\s+chown\s+.*\s+/', # Sudo dangerous ownership
             r'dd\s+if=/dev/zero',      # Disk destruction
-            r':\(\)\{\s*\|\|\s*\}\s*:&', # Fork bomb
+            r':\(\)\{\.*:\|.*\}\.*:', # Fork bomb - fixed regex
             r'eval\s+\$\(.*\)',        # Eval injection
             r'exec\s+\$\(.*\)',        # Exec injection
         ]
