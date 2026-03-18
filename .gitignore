@@ -169,16 +169,31 @@ start.py
 fix_*.ps1
 *.ps1
 
-# Configuration files (keeping only essential ones)
-postcss.config.js
-tailwind.config.js
+# Documentation and reports
+*.md
+!README.md
+!LICENSE
 
-# CSS files (using inline styles)
-*.css
-!*.min.css
+# HTML files
+*.html
 
-# Multiple app versions
-App*.jsx
-!App_final.jsx
-!App_demo.jsx
+# Backend junk files
+app_demo.py
+main_simple.py
+app.log
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Frontend junk files
+styles.css
+fix_jsx.ps1
+App_*.jsx
+!App.jsx
+*_Apple.jsx
+*_working.jsx
+AllComponents_*.jsx
+LiveTerminal.jsx
+
 .windsurfrules

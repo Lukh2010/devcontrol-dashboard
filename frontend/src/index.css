@@ -1,0 +1,145 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #f5f5f5;
+    color: #333;
+  }
+}
+
+@layer components {
+  .panel {
+    background: #ffffff;
+    border: 1px solid #e0e0e0;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+  }
+  
+  .panel-header {
+    background: #fafafa;
+    padding: 16px 20px;
+    border-bottom: 1px solid #e0e0e0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  
+  .panel-title {
+    color: #333;
+    font-weight: 600;
+    font-size: 18px;
+  }
+  
+  .data-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+  }
+  
+  .data-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background-color 0.2s;
+  }
+  
+  .data-row:hover {
+    background-color: #f8f9fa;
+  }
+  
+  .status-online {
+    color: #28ca42;
+  }
+  
+  .status-offline {
+    color: #ff5f57;
+  }
+  
+  .status-warning {
+    color: #ffbd2e;
+  }
+  
+  .btn-primary {
+    background: #007aff;
+    color: white;
+    padding: 8px 16px;
+    font-weight: 500;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+  
+  .btn-primary:hover {
+    background: #0056b3;
+  }
+  
+  .btn-danger {
+    background: #ff5f57;
+    color: white;
+    padding: 8px 16px;
+    font-weight: 500;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+  
+  .btn-danger:hover {
+    background: #ff4136;
+  }
+  
+  .btn-secondary {
+    background: #6c757d;
+    color: white;
+    padding: 8px 16px;
+    font-weight: 500;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+  
+  .btn-secondary:hover {
+    background: #5a6268;
+  }
+  
+  .terminal-text {
+    color: #28ca42;
+    font-family: 'Monaco', 'Consolas', monospace;
+    font-size: 14px;
+  }
+  
+  .metric-card {
+    background: #ffffff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+  }
+  
+  .metric-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: #333;
+    margin-bottom: 4px;
+  }
+  
+  .metric-label {
+    font-size: 12px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+}

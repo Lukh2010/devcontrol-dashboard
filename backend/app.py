@@ -5,9 +5,127 @@ import socket
 import subprocess
 import platform
 import time
+import asyncio
+import websockets
+import json
+import threading
+import os
+from terminal_session import TerminalSessionManager
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"])
+CORS(app, origins="*")
+
+# Terminal session manager
+terminal_manager = TerminalSessionManager()
+
+# Global CPU measurement cache
+cpu_cache = {}
+last_cpu_update = 0
+
+def update_cpu_cache():
+    """Update global CPU measurement cache"""
+    global cpu_cache, last_cpu_update
+    import time
+    
+    current_time = time.time()
+    if current_time - last_cpu_update < 1.0:  # Update every 1 second
+        return
+    
+    try:
+        # Initialize CPU measurement
+        psutil.cpu_percent(interval=0.1)
+        
+        # Get CPU for all processes
+        new_cache = {}
+        for proc in psutil.process_iter(['pid']):
+            try:
+                cpu_percent = proc.cpu_percent()
+                new_cache[proc.pid] = cpu_percent
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                new_cache[proc.pid] = 0
+        
+        cpu_cache = new_cache
+        last_cpu_update = current_time
+    except Exception as e:
+        print(f"Error updating CPU cache: {e}")
+
+# WebSocket server
+async def handle_websocket(websocket, path):
+    """Handle WebSocket connections for terminal sessions"""
+    try:
+        session_id = await terminal_manager.create_session(websocket)
+        
+        async for message in websocket:
+            try:
+                data = json.loads(message)
+                await terminal_manager.handle_message(session_id, data)
+            except json.JSONDecodeError:
+                await websocket.send(json.dumps({
+                    'type': 'error',
+                    'message': 'Invalid JSON message'
+                }))
+            except Exception as e:
+                await websocket.send(json.dumps({
+                    'type': 'error',
+                    'message': f'Error handling message: {str(e)}'
+                }))
+                
+    except websockets.exceptions.ConnectionClosed:
+        pass
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+    finally:
+        if 'session_id' in locals():
+            await terminal_manager.close_session(session_id)
+
+def start_websocket_server():
+    """Start WebSocket server in a separate thread"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        start_server = websockets.serve(handle_websocket, "0.0.0.0", 8003)
+        loop.run_until_complete(start_server)
+        print("WebSocket terminal server started on ws://localhost:8003")
+        loop.run_forever()
+    except OSError as e:
+        if "address already in use" in str(e).lower() or "10048" in str(e):
+            print("WebSocket port 8003 already in use, continuing without WebSocket terminal...")
+        else:
+            raise e
+
+# Start WebSocket server in background thread only if not already running
+import threading
+import time
+
+def start_websocket_if_not_running():
+    """Start WebSocket server only if not already running"""
+    # Check if port 8003 is already in use by our own process
+    try:
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        result = sock.connect_ex(('localhost', 8003))
+        sock.close()
+        
+        if result == 0:
+            # Port is already in use, don't start another WebSocket server
+            print("WebSocket server already running, skipping...")
+            return
+        
+        # Port is free, start WebSocket server
+        websocket_thread = threading.Thread(target=start_websocket_server, daemon=True)
+        websocket_thread.start()
+        print("WebSocket server thread started")
+        
+    except Exception as e:
+        print(f"Error checking WebSocket port: {e}")
+        # Try to start anyway
+        websocket_thread = threading.Thread(target=start_websocket_server, daemon=True)
+        websocket_thread.start()
+
+# Start WebSocket server with delay to avoid conflicts
+timer = threading.Timer(2.0, start_websocket_if_not_running)
+timer.start()
 
 @app.route("/")
 def root():
@@ -103,19 +221,22 @@ def get_system_performance():
 def get_processes():
     """Get running processes with CPU and memory usage"""
     try:
-        # Get CPU count once for proper calculation
-        cpu_count = psutil.cpu_count()
+        # Update CPU cache if needed
+        update_cpu_cache()
+        
         processes = []
         
-        for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_info', 'status']):
+        # Get all processes with their info
+        for proc in psutil.process_iter(['pid', 'name', 'memory_info', 'status']):
             try:
                 pinfo = proc.info
-                # Get CPU percentage per process (already normalized by psutil)
-                cpu_percent = pinfo['cpu_percent'] or 0
+                
+                # Get CPU from cache
+                cpu_percent = cpu_cache.get(proc.pid, 0)
                 memory_mb = pinfo['memory_info'].rss / 1024 / 1024 if pinfo['memory_info'] else 0
                 
-                # Skip System Idle Process and processes with 0 CPU
-                if pinfo['name'] and pinfo['name'] != 'System Idle Process' and cpu_percent > 0:
+                # Skip System Idle Process
+                if pinfo['name'] and pinfo['name'] != 'System Idle Process':
                     processes.append({
                         "pid": pinfo['pid'],
                         "name": pinfo['name'] or 'Unknown',
@@ -126,9 +247,9 @@ def get_processes():
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
         
-        # Sort by CPU usage and return top 20
+        # Sort by CPU usage and return top 15
         processes.sort(key=lambda x: x['cpu_percent'], reverse=True)
-        return jsonify(processes[:20])
+        return jsonify(processes[:15])
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -187,13 +308,40 @@ def run_command():
         if any(dangerous in command.lower() for dangerous in dangerous_commands):
             return jsonify({"error": "Dangerous command detected"}), 400
         
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
+        import shlex
+        
+        # Execute command safely
+        if platform.system() == 'Windows':
+            # On Windows, use shell=True for built-in commands but validate input
+            if any(cmd in command.lower() for cmd in ['del', 'rmdir', 'format', 'shutdown']):
+                return jsonify({"error": "Dangerous command blocked for security"}), 403
+            
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+        else:
+            # On Unix-like systems, avoid shell=True
+            try:
+                args = shlex.split(command)
+                result = subprocess.run(
+                    args,
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+            except ValueError:
+                # Fallback for complex commands
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
         
         return jsonify({
             "command": command,
@@ -316,5 +464,110 @@ def ping_host():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/processes/<int:pid>/kill", methods=["POST"])
+def kill_process(pid):
+    """Kill a specific process (admin only)"""
+    try:
+        # Check admin privileges on Windows
+        if platform.system() == 'Windows':
+            try:
+                import ctypes
+                is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+                if not is_admin:
+                    return jsonify({
+                        "error": "Administrator privileges required",
+                        "message": "Please run the dashboard as Administrator"
+                    }), 403
+            except:
+                return jsonify({
+                    "error": "Could not verify admin privileges",
+                    "message": "Please run the dashboard as Administrator"
+                }), 403
+        
+        # Get process info before killing
+        try:
+            process = psutil.Process(pid)
+            process_name = process.name()
+        except psutil.NoSuchProcess:
+            return jsonify({"error": f"Process {pid} not found"}), 404
+        
+        # Load dashboard PIDs to check if this is a dashboard process
+        from pathlib import Path
+        import json
+        
+        pid_file = Path.home() / '.devcontrol_pids.json'
+        dashboard_pids = {}
+        
+        if pid_file.exists():
+            try:
+                with open(pid_file, 'r') as f:
+                    dashboard_pids = json.load(f)
+            except:
+                pass
+        
+        # Check if this PID belongs to dashboard
+        is_dashboard_process = (
+            str(pid) in dashboard_pids.get('backend', []) or
+            str(pid) in dashboard_pids.get('frontend', []) or
+            str(pid) in dashboard_pids.get('websocket', [])
+        )
+        
+        # Allow killing dashboard processes or admin can kill any process
+        if not is_dashboard_process and platform.system() != 'Windows':
+            return jsonify({
+                "error": "Can only kill dashboard processes",
+                "message": f"Process {pid} ({process_name}) is not a dashboard process"
+            }), 403
+        
+        # Kill the process
+        process.terminate()
+        
+        # Wait a bit and force kill if still running
+        try:
+            process.wait(timeout=3)
+        except psutil.TimeoutExpired:
+            process.kill()
+        
+        return jsonify({
+            "success": True,
+            "message": f"Process {pid} ({process_name}) killed successfully",
+            "pid": pid,
+            "name": process_name
+        })
+        
+    except psutil.NoSuchProcess:
+        return jsonify({"error": f"Process {pid} not found"}), 404
+    except psutil.AccessDenied:
+        return jsonify({"error": f"Access denied to process {pid}"}), 403
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/system/is-admin")
+def is_admin():
+    """Check if current user has administrator privileges"""
+    try:
+        if platform.system() == 'Windows':
+            try:
+                import ctypes
+                is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+                return jsonify({
+                    "is_admin": is_admin,
+                    "platform": platform.system()
+                })
+            except Exception as e:
+                return jsonify({
+                    "is_admin": False,
+                    "platform": platform.system(),
+                    "error": str(e)
+                })
+        else:
+            # Unix-like systems - check if running as root
+            return jsonify({
+                "is_admin": os.geteuid() == 0 if hasattr(os, 'geteuid') else False,
+                "platform": platform.system()
+            })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    app.run(host="0.0.0.0", port=8000, debug=False)

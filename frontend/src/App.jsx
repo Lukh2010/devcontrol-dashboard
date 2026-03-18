@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Activity, Cpu, Network, Terminal, Wifi } from 'lucide-react';
-import CommandRunner from './components/CommandRunner_Apple.jsx';
-import NetworkHub from './components/NetworkHub_Apple.jsx';
-import ProcessMonitor from './components/ProcessMonitor_Apple.jsx';
+import SystemMonitor from './components/SystemMonitor';
+import PortControl from './components/PortControl';
+import NetworkHub from './components/NetworkHub';
+import WindowTerminal from './components/WindowTerminal';
+import ProcessManager from './components/ProcessManager';
 
 const styles = {
   container: {
@@ -74,17 +76,27 @@ const styles = {
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
-    gap: '6px'
+    justifyContent: 'center',
+    gap: '6px',
+    minWidth: '44px',
+    minHeight: '44px',
+    touchAction: 'manipulation'
   },
   navButton: {
     backgroundColor: 'transparent',
     color: '#6c757d',
     border: 'none',
     borderRadius: '8px',
-    padding: '8px 12px',
+    padding: '10px 12px',
     fontSize: '14px',
     fontWeight: '500',
-    cursor: 'pointer'
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    minWidth: '44px',
+    minHeight: '44px',
+    touchAction: 'manipulation'
   },
   navButtonActive: {
     backgroundColor: '#007aff',
@@ -114,165 +126,6 @@ const styles = {
   }
 };
 
-const SystemMonitor = () => {
-  const [performanceData, setPerformanceData] = useState(null);
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const response = await fetch('http://localhost:8000/api/system/performance');
-        const data = await response.json();
-        setPerformanceData(data);
-      } catch (error) {
-        console.error('Failed to fetch performance data:', error);
-      }
-    };
-
-    fetchData();
-    const interval = setInterval(fetchData, 2000);
-    return () => clearInterval(interval);
-  }, []);
-
-  if (!performanceData) {
-    return (
-      <div style={styles.card}>
-        <div style={styles.cardHeader}>
-          <h2 style={styles.cardTitle}>
-            <Activity style={{width: '20px', height: '20px'}} />
-            System Performance
-          </h2>
-        </div>
-        <div style={styles.cardContent}>
-          Loading system data...
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={styles.card}>
-      <div style={styles.cardHeader}>
-        <h2 style={styles.cardTitle}>
-          <Activity style={{width: '20px', height: '20px'}} />
-          System Performance
-        </h2>
-      </div>
-      <div style={styles.cardContent}>
-        <div style={styles.grid3}>
-          <div style={styles.metricCard}>
-            <div style={styles.metricValue}>{performanceData.cpu_percent.toFixed(1)}%</div>
-            <div style={styles.metricLabel}>CPU Usage</div>
-            <div style={styles.progressBar}>
-              <div style={{...styles.progressFill, width: `${performanceData.cpu_percent}%`}}></div>
-            </div>
-          </div>
-          <div style={styles.metricCard}>
-            <div style={styles.metricValue}>{performanceData.memory.percent.toFixed(1)}%</div>
-            <div style={styles.metricLabel}>Memory Usage</div>
-            <div style={styles.progressBar}>
-              <div style={{...styles.progressFill, width: `${performanceData.memory.percent}%`}}></div>
-            </div>
-          </div>
-          <div style={styles.metricCard}>
-            <div style={styles.metricValue}>{performanceData.disk.percent.toFixed(1)}%</div>
-            <div style={styles.metricLabel}>Disk Usage</div>
-            <div style={styles.progressBar}>
-              <div style={{...styles.progressFill, width: `${performanceData.disk.percent}%`}}></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const PortControl = () => {
-  const [ports, setPorts] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchPorts = async () => {
-      try {
-        const response = await fetch('http://localhost:8000/api/ports');
-        const data = await response.json();
-        setPorts(data);
-        setLoading(false);
-      } catch (error) {
-        console.error('Failed to fetch ports:', error);
-        setLoading(false);
-      }
-    };
-
-    fetchPorts();
-    const interval = setInterval(fetchPorts, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  if (loading) {
-    return (
-      <div style={styles.card}>
-        <div style={styles.cardHeader}>
-          <h2 style={styles.cardTitle}>
-            <Network style={{width: '20px', height: '20px'}} />
-            Port Control
-          </h2>
-        </div>
-        <div style={styles.cardContent}>
-          Scanning ports...
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={styles.card}>
-      <div style={styles.cardHeader}>
-        <h2 style={styles.cardTitle}>
-          <Network style={{width: '20px', height: '20px'}} />
-          Port Control
-        </h2>
-      </div>
-      <div style={styles.cardContent}>
-        {ports.length === 0 ? (
-          <div style={{textAlign: 'center', padding: '40px 0', color: '#6c757d'}}>
-            No active listening ports found
-          </div>
-        ) : (
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.tableCell}>Port</th>
-                <th style={styles.tableCell}>Process</th>
-                <th style={styles.tableCell}>PID</th>
-                <th style={styles.tableCell}>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ports.slice(0, 10).map((portInfo, index) => (
-                <tr key={index}>
-                  <td style={styles.tableCell}>
-                    <strong>{portInfo.port}</strong>
-                  </td>
-                  <td style={styles.tableCell}>{portInfo.process_name}</td>
-                  <td style={styles.tableCell}>{portInfo.pid}</td>
-                  <td style={styles.tableCell}>
-                    <button
-                      onClick={() => alert(`Kill process on port ${portInfo.port}`)}
-                      style={{...styles.button, backgroundColor: '#ff3b30', padding: '6px 12px', fontSize: '12px'}}
-                    >
-                      Kill
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
-  );
-};
-
 function App() {
   const [systemInfo, setSystemInfo] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -285,7 +138,7 @@ function App() {
 
     const fetchSystemInfo = async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/system/info');
+        const response = await fetch('/api/system/info');
         const data = await response.json();
         setSystemInfo(data);
       } catch (error) {
@@ -340,8 +193,8 @@ function App() {
             {[
               { id: 'overview', label: 'Overview', icon: Activity },
               { id: 'ports', label: 'Port Control', icon: Network },
-              { id: 'processes', label: 'Processes', icon: Cpu },
-              { id: 'commands', label: 'Commands', icon: Terminal },
+              { id: 'process-manager', label: 'Processes', icon: Cpu },
+              { id: 'commands', label: 'Terminal', icon: Terminal },
               { id: 'network', label: 'Network', icon: Wifi },
             ].map(({ id, label, icon: Icon }) => (
               <button
@@ -387,13 +240,16 @@ function App() {
         </div>
       )}
 
-      <div style={styles.grid2}>
+      <div style={activePanel === 'overview' ? styles.grid2 : {}}>
         {activePanel === 'overview' && (
-          <SystemMonitor />
+          <>
+            <SystemMonitor />
+            <PortControl />
+          </>
         )}
         {activePanel === 'ports' && <PortControl />}
-        {activePanel === 'processes' && <ProcessMonitor />}
-        {activePanel === 'commands' && <CommandRunner />}
+        {activePanel === 'process-manager' && <ProcessManager />}
+        {activePanel === 'commands' && <WindowTerminal />}
         {activePanel === 'network' && <NetworkHub />}
       </div>
     </div>
