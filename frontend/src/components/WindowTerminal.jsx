@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Terminal, Minus, Square, Copy } from 'lucide-react';
 
 const WindowTerminal = () => {
-  const [ws, setWs] = useState(null);
   const [connected, setConnected] = useState(false);
   const [output, setOutput] = useState([]);
   const [currentCommand, setCurrentCommand] = useState('');
@@ -14,20 +13,20 @@ const WindowTerminal = () => {
   const terminalRef = useRef(null);
   const inputRef = useRef(null);
   const outputEndRef = useRef(null);
+  const wsRef = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
 
   // WebSocket connection
   useEffect(() => {
-    let reconnectTimeout;
-    
     const connectWebSocket = () => {
       try {
         console.log('Connecting to WebSocket on ws://localhost:8003...');
-        const websocket = new WebSocket('ws://localhost:8003');
+        const websocket = new WebSocket(`ws://${window.location.hostname}:8003`);
         
         websocket.onopen = () => {
           console.log('WebSocket connected successfully!');
           setConnected(true);
-          setWs(websocket);
+          wsRef.current = websocket;
           setOutput([{ type: 'system', text: 'Connected to terminal server' }]);
         };
         
@@ -39,9 +38,9 @@ const WindowTerminal = () => {
         websocket.onclose = (event) => {
           console.log('WebSocket disconnected:', event.code, event.reason);
           setConnected(false);
-          setWs(null);
+          wsRef.current = null;
           // Attempt to reconnect after 3 seconds
-          reconnectTimeout = setTimeout(connectWebSocket, 3000);
+          reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
         };
         
         websocket.onerror = (error) => {
@@ -55,18 +54,18 @@ const WindowTerminal = () => {
         setConnected(false);
         setOutput(prev => [...prev, { type: 'error', text: 'Failed to connect. Retrying...' }]);
         // Retry connection after 3 seconds
-        reconnectTimeout = setTimeout(connectWebSocket, 3000);
+        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
       }
     };
 
     connectWebSocket();
     
     return () => {
-      if (reconnectTimeout) {
-        clearTimeout(reconnectTimeout);
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
       }
-      if (ws) {
-        ws.close();
+      if (wsRef.current) {
+        wsRef.current.close();
       }
     };
   }, []);
@@ -130,7 +129,7 @@ const WindowTerminal = () => {
   };
 
   const sendCommand = (command) => {
-    if (!ws || !connected) {
+    if (!wsRef.current || !connected) {
       console.log('Cannot send command - WebSocket not connected');
       addOutput({ type: 'error', text: 'Terminal not connected. Please wait...' });
       return;
@@ -152,7 +151,7 @@ const WindowTerminal = () => {
     
     try {
       // Send command
-      ws.send(JSON.stringify({
+      wsRef.current.send(JSON.stringify({
         type: 'execute_command',
         command: command
       }));
@@ -193,14 +192,14 @@ const WindowTerminal = () => {
   };
 
   const interruptCommand = () => {
-    if (ws && connected) {
-      ws.send(JSON.stringify({ type: 'interrupt' }));
+    if (wsRef.current && connected) {
+      wsRef.current.send(JSON.stringify({ type: 'interrupt' }));
     }
   };
 
   const confirmSudo = (confirmed) => {
-    if (ws && connected && sudoModal) {
-      ws.send(JSON.stringify({
+    if (wsRef.current && connected && sudoModal) {
+      wsRef.current.send(JSON.stringify({
         type: 'sudo_confirm',
         confirmed: confirmed
       }));

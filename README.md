@@ -34,6 +34,21 @@ For system administrator commands like `net sess`, run with elevated privileges:
 2. **Navigate to project**: `cd path/to/your/devcontrol-dashboard`
 3. **Run dashboard**: `python start.py`
 
+### Linux Start
+For Linux systems, use the dedicated start script:
+
+**Method 1: Start Script (Recommended)**
+```bash
+chmod +x scripts/start_linux.sh
+./scripts/start_linux.sh
+```
+
+This script will:
+- ✅ Start backend and frontend in background
+- ✅ Save PIDs for clean shutdown
+- ✅ Show local network IP for mobile access
+- ✅ Open browser automatically
+
 ## 📁 Project Structure
 
 ```
@@ -170,6 +185,33 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Vite** - Build tool and development server
 - **psutil** - System monitoring library
 - **Tailwind CSS** - Utility-first CSS framework
+
+## ⚠️ Sicherheit & Datenschutz (Privatnutzung)
+
+Dieses Dashboard ist ausschließlich für den Einsatz im privaten Heimnetz konzipiert. Folgende Sicherheitsaspekte sind bewusst vereinfacht:
+
+### Bekannte offene Punkte
+| Risiko | Auswirkung | Empfehlung |
+|--------|-----------|------------|
+| Keine Authentifizierung | Jeder im Heimnetz kann das Dashboard nutzen | Nur im eigenen WLAN betreiben |
+| API bindet auf 0.0.0.0 | Erreichbar von allen Netzwerkgeräten | Kein Port-Forwarding einrichten |
+| shell=True für Windows-Befehle | Bei manipuliertem Input möglich Command Injection | Nur vertrauenswürdige Personen ins Netz lassen |
+| Keine Rate Limits | Theoretisch DoS aus dem Heimnetz möglich | Irrelevant bei privatem Heimnetz |
+| Terminal hat Admin-Rechte | Befehle laufen mit vollen Systemrechten | Dashboard nicht im Büro oder öffentlichem WLAN starten |
+| Ping erlaubt private IPs | Netzwerk-Scan im Heimnetz möglich | Gewollt — für Router/NAS-Zugriff |
+| Process Kill UI | Prozesse können über UI gekillt werden | Nur mit Admin-Rechten nutzen |
+
+### Was NICHT passieren kann
+- ✅ Kein Internetzugriff auf das Dashboard (kein Port-Forwarding)
+- ✅ Keine Datenspeicherung oder -übertragung nach außen
+- ✅ Keine wirklich destruktiven Befehle (rm -rf /, format) werden ohne Bestätigung ausgeführt
+- ✅ Keine system-weiten Prozess-Kills (nur eigene Dashboard-Prozesse)
+
+### Empfohlene Nutzung
+- Im privaten Heimnetz mit WPA2/WPA3 WLAN
+- Nicht in öffentlichen Netzwerken starten
+- Nicht dauerhaft als Dienst/Autostart laufen lassen
+- Process Manager nur als Admin verwenden
 
 ---
 

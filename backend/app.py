@@ -9,10 +9,11 @@ import asyncio
 import websockets
 import json
 import threading
+import os
 from terminal_session import TerminalSessionManager
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"])
+CORS(app, origins="*")
 
 # Terminal session manager
 terminal_manager = TerminalSessionManager()
@@ -83,7 +84,7 @@ def start_websocket_server():
     asyncio.set_event_loop(loop)
     
     try:
-        start_server = websockets.serve(handle_websocket, "localhost", 8003)
+        start_server = websockets.serve(handle_websocket, "0.0.0.0", 8003)
         loop.run_until_complete(start_server)
         print("WebSocket terminal server started on ws://localhost:8003")
         loop.run_forever()
@@ -460,6 +461,111 @@ def ping_host():
         return jsonify(latency_info)
     except subprocess.TimeoutExpired:
         return jsonify({"error": "Ping request timed out"}), 408
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/processes/<int:pid>/kill", methods=["POST"])
+def kill_process(pid):
+    """Kill a specific process (admin only)"""
+    try:
+        # Check admin privileges on Windows
+        if platform.system() == 'Windows':
+            try:
+                import ctypes
+                is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+                if not is_admin:
+                    return jsonify({
+                        "error": "Administrator privileges required",
+                        "message": "Please run the dashboard as Administrator"
+                    }), 403
+            except:
+                return jsonify({
+                    "error": "Could not verify admin privileges",
+                    "message": "Please run the dashboard as Administrator"
+                }), 403
+        
+        # Get process info before killing
+        try:
+            process = psutil.Process(pid)
+            process_name = process.name()
+        except psutil.NoSuchProcess:
+            return jsonify({"error": f"Process {pid} not found"}), 404
+        
+        # Load dashboard PIDs to check if this is a dashboard process
+        from pathlib import Path
+        import json
+        
+        pid_file = Path.home() / '.devcontrol_pids.json'
+        dashboard_pids = {}
+        
+        if pid_file.exists():
+            try:
+                with open(pid_file, 'r') as f:
+                    dashboard_pids = json.load(f)
+            except:
+                pass
+        
+        # Check if this PID belongs to dashboard
+        is_dashboard_process = (
+            str(pid) in dashboard_pids.get('backend', []) or
+            str(pid) in dashboard_pids.get('frontend', []) or
+            str(pid) in dashboard_pids.get('websocket', [])
+        )
+        
+        # Allow killing dashboard processes or admin can kill any process
+        if not is_dashboard_process and platform.system() != 'Windows':
+            return jsonify({
+                "error": "Can only kill dashboard processes",
+                "message": f"Process {pid} ({process_name}) is not a dashboard process"
+            }), 403
+        
+        # Kill the process
+        process.terminate()
+        
+        # Wait a bit and force kill if still running
+        try:
+            process.wait(timeout=3)
+        except psutil.TimeoutExpired:
+            process.kill()
+        
+        return jsonify({
+            "success": True,
+            "message": f"Process {pid} ({process_name}) killed successfully",
+            "pid": pid,
+            "name": process_name
+        })
+        
+    except psutil.NoSuchProcess:
+        return jsonify({"error": f"Process {pid} not found"}), 404
+    except psutil.AccessDenied:
+        return jsonify({"error": f"Access denied to process {pid}"}), 403
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/system/is-admin")
+def is_admin():
+    """Check if current user has administrator privileges"""
+    try:
+        if platform.system() == 'Windows':
+            try:
+                import ctypes
+                is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+                return jsonify({
+                    "is_admin": is_admin,
+                    "platform": platform.system()
+                })
+            except Exception as e:
+                return jsonify({
+                    "is_admin": False,
+                    "platform": platform.system(),
+                    "error": str(e)
+                })
+        else:
+            # Unix-like systems - check if running as root
+            return jsonify({
+                "is_admin": os.geteuid() == 0 if hasattr(os, 'geteuid') else False,
+                "platform": platform.system()
+            })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
