@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Cpu, Network, Terminal, Wifi, Settings } from 'lucide-react';
+import { Activity, Cpu, Network, Terminal, Wifi } from 'lucide-react';
 import SystemMonitor from './components/SystemMonitor';
 import PortControl from './components/PortControl';
-import ProcessMonitor from './components/ProcessMonitor';
 import NetworkHub from './components/NetworkHub';
 import WindowTerminal from './components/WindowTerminal';
 import ProcessManager from './components/ProcessManager';
@@ -194,8 +193,7 @@ function App() {
             {[
               { id: 'overview', label: 'Overview', icon: Activity },
               { id: 'ports', label: 'Port Control', icon: Network },
-              { id: 'processes', label: 'Processes', icon: Cpu },
-              { id: 'process-manager', label: 'Process Manager', icon: Settings },
+              { id: 'process-manager', label: 'Processes', icon: Cpu },
               { id: 'commands', label: 'Terminal', icon: Terminal },
               { id: 'network', label: 'Network', icon: Wifi },
             ].map(({ id, label, icon: Icon }) => (
@@ -250,7 +248,6 @@ function App() {
           </>
         )}
         {activePanel === 'ports' && <PortControl />}
-        {activePanel === 'processes' && <ProcessMonitor />}
         {activePanel === 'process-manager' && <ProcessManager />}
         {activePanel === 'commands' && <WindowTerminal />}
         {activePanel === 'network' && <NetworkHub />}

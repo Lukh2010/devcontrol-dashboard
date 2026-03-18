@@ -84,7 +84,7 @@ def start_websocket_server():
     asyncio.set_event_loop(loop)
     
     try:
-        start_server = websockets.serve(handle_websocket, "localhost", 8003)
+        start_server = websockets.serve(handle_websocket, "0.0.0.0", 8003)
         loop.run_until_complete(start_server)
         print("WebSocket terminal server started on ws://localhost:8003")
         loop.run_forever()
