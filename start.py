@@ -22,25 +22,25 @@ class DevControlStarter:
         
     def check_dependencies(self):
         """Check if required dependencies are available"""
-        print("🔍 Checking dependencies...")
+        print("[INFO] Checking dependencies...")
         
         # Check Python
         python_version = sys.version_info
-        if python_version.major < 3 or (python_version.major == 3 and python_version.minor < 7):
-            print("❌ Python 3.7+ is required")
+        if python_version.major < 3 or (python_version.major == 3 and python_version.minor < 10):
+            print("[ERROR] Python 3.10+ is required")
             return False
-        print(f"✅ Python {python_version.major}.{python_version.minor}.{python_version.micro}")
+        print(f"[OK] Python {python_version.major}.{python_version.minor}.{python_version.micro}")
         
         # Check Node.js
         try:
             result = subprocess.run(['node', '--version'], capture_output=True, text=True)
             if result.returncode == 0:
-                print(f"✅ Node.js {result.stdout.strip()}")
+                print(f"[OK] Node.js {result.stdout.strip()}")
             else:
-                print("❌ Node.js is not installed")
+                print("[ERROR] Node.js is not installed")
                 return False
         except FileNotFoundError:
-            print("❌ Node.js is not installed")
+            print("[ERROR] Node.js is not installed")
             return False
         
         # Check npm
@@ -48,23 +48,23 @@ class DevControlStarter:
         try:
             result = subprocess.run([npm_cmd, '--version'], capture_output=True, text=True)
             if result.returncode == 0:
-                print(f"✅ npm {result.stdout.strip()}")
+                print(f"[OK] npm {result.stdout.strip()}")
             else:
-                print("❌ npm is not installed")
+                print("[ERROR] npm is not installed")
                 return False
         except FileNotFoundError:
-            print("❌ npm is not installed")
+            print("[ERROR] npm is not installed")
             return False
         
         return True
     
     def install_backend_deps(self):
         """Install backend Python dependencies"""
-        print("\n📦 Installing backend dependencies...")
+        print("\n[INFO] Installing backend dependencies...")
         
         requirements_file = self.backend_dir / "requirements.txt"
         if not requirements_file.exists():
-            print("❌ requirements.txt not found in backend directory")
+            print("[ERROR] requirements.txt not found in backend directory")
             return False
         
         try:
@@ -72,19 +72,19 @@ class DevControlStarter:
                 sys.executable, '-m', 'pip', 'install', 
                 'flask', 'flask-cors', 'psutil', 'python-multipart'
             ], check=True, cwd=self.backend_dir)
-            print("✅ Backend dependencies installed")
+            print("[OK] Backend dependencies installed")
             return True
         except subprocess.CalledProcessError as e:
-            print(f"❌ Failed to install backend dependencies: {e}")
+            print(f"[ERROR] Failed to install backend dependencies: {e}")
             return False
     
     def install_frontend_deps(self):
         """Install frontend Node.js dependencies"""
-        print("\n📦 Installing frontend dependencies...")
+        print("\n[INFO] Installing frontend dependencies...")
         
         package_json = self.frontend_dir / "package.json"
         if not package_json.exists():
-            print("❌ package.json not found in frontend directory")
+            print("[ERROR] package.json not found in frontend directory")
             return False
         
         node_modules = self.frontend_dir / "node_modules"
@@ -92,22 +92,22 @@ class DevControlStarter:
         if not node_modules.exists():
             try:
                 subprocess.run([npm_cmd, 'install'], check=True, cwd=self.frontend_dir)
-                print("✅ Frontend dependencies installed")
+                print("[OK] Frontend dependencies installed")
             except subprocess.CalledProcessError as e:
-                print(f"❌ Failed to install frontend dependencies: {e}")
+                print(f"[ERROR] Failed to install frontend dependencies: {e}")
                 return False
         else:
-            print("✅ Frontend dependencies already installed")
+            print("[OK] Frontend dependencies already installed")
         
         return True
     
     def start_backend(self):
         """Start the Flask backend server"""
-        print("\n🚀 Starting backend server...")
+        print("\n[INFO] Starting backend server...")
         
         app_file = self.backend_dir / "app.py"
         if not app_file.exists():
-            print("❌ app.py not found in backend directory")
+            print("[ERROR] app.py not found in backend directory")
             return False
         
         try:
@@ -119,19 +119,19 @@ class DevControlStarter:
             )
             time.sleep(2)
             if self.backend_process.poll() is None:
-                print("✅ Backend server started on http://localhost:8000")
-                print("✅ WebSocket terminal server started on ws://localhost:8003")
+                print("[OK] Backend server started on http://localhost:8000")
+                print("[OK] WebSocket terminal server started on ws://localhost:8003")
                 return True
             else:
-                print(f"❌ Backend failed to start with exit code: {self.backend_process.returncode}")
+                print(f"[ERROR] Backend failed to start with exit code: {self.backend_process.returncode}")
                 return False
         except Exception as e:
-            print(f"❌ Failed to start backend: {e}")
+            print(f"[ERROR] Failed to start backend: {e}")
             return False
     
     def start_frontend(self):
         """Start the React frontend development server"""
-        print("\n🚀 Starting frontend server...")
+        print("\n[INFO] Starting frontend server...")
         
         npm_cmd = 'npm.cmd' if platform.system() == 'Windows' else 'npm'
         try:
@@ -143,22 +143,22 @@ class DevControlStarter:
             # Wait a moment and check if it started successfully
             time.sleep(3)
             if self.frontend_process.poll() is None:
-                print("✅ Frontend server started on http://localhost:3000")
+                print("[OK] Frontend server started on http://localhost:3000")
                 return True
             else:
-                print(f"❌ Frontend failed to start with exit code: {self.frontend_process.returncode}")
+                print(f"[ERROR] Frontend failed to start with exit code: {self.frontend_process.returncode}")
                 return False
         except Exception as e:
-            print(f"❌ Failed to start frontend: {e}")
+            print(f"[ERROR] Failed to start frontend: {e}")
             return False
     
     def monitor_processes(self):
         """Monitor running processes and handle shutdown"""
-        print("\n📊 Servers are running. Press Ctrl+C to stop all servers.")
-        print("🌐 Dashboard: http://localhost:3000")
-        print("🔧 Backend API: http://localhost:8000")
-        print("🔌 WebSocket Terminal: ws://localhost:8002")
-        print("\n⚡ Real Terminal ready! Navigate to TERMINAL tab in dashboard.")
+        print("\nServers are running. Press Ctrl+C to stop all servers.")
+        print("Dashboard: http://localhost:3000")
+        print("Backend API: http://localhost:8000")
+        print("WebSocket Terminal: ws://localhost:8002")
+        print("\nReal Terminal ready! Navigate to TERMINAL tab in dashboard.")
         print("\nMonitoring server status...")
         
         try:
@@ -170,18 +170,18 @@ class DevControlStarter:
                 frontend_running = self.frontend_process and self.frontend_process.poll() is None
                 
                 if not backend_running:
-                    print("❌ Backend server stopped unexpectedly")
+                    print("[ERROR] Backend server stopped unexpectedly")
                     self.stop_all()
                     break
                     
                 if not frontend_running:
-                    print("❌ Frontend server stopped unexpectedly")
+                    print("[ERROR] Frontend server stopped unexpectedly")
                     self.stop_all()
                     break
                     
                 # Print minimal status every 30 seconds
                 if int(time.time()) % 30 == 0:
-                    print(f"✅ All systems operational")
+                    print(f"[OK] All systems operational")
                     
         except KeyboardInterrupt:
             print("\nStopping dashboard...")
@@ -190,7 +190,7 @@ class DevControlStarter:
             import sys
             sys.exit(0)
         except Exception as e:
-            print(f"\n❌ Monitor error: {e}")
+            print(f"\n[ERROR] Monitor error: {e}")
             self.stop_all()
     
     def stop_all(self):
@@ -311,11 +311,11 @@ class DevControlStarter:
                                     pid = parts[-1]
                                     try:
                                         subprocess.run(f'taskkill /F /PID {pid}', shell=True, capture_output=True)
-                                        print(f"✅ Killed process {pid} on port {port}")
+                                        print(f"[OK] Killed process {pid} on port {port}")
                                     except:
-                                        print(f"⚠️ Could not kill process {pid} on port {port}")
+                                        print(f"[WARN] Could not kill process {pid} on port {port}")
                 except Exception as e:
-                    print(f"⚠️ Error cleaning port {port}: {e}")
+                    print(f"[WARN] Error cleaning port {port}: {e}")
         
         else:
             # Unix-like systems cleanup
@@ -338,9 +338,9 @@ class DevControlStarter:
                                 subprocess.run(f'kill -9 {pid}', shell=True, capture_output=True)
                                 print(f"✅ Killed process {pid} on port {port}")
                             except:
-                                print(f"⚠️ Could not kill process {pid} on port {port}")
+                                print(f"[WARN] Could not kill process {pid} on port {port}")
                 except Exception as e:
-                    print(f"⚠️ Error cleaning port {port}: {e}")
+                    print(f"[WARN] Error cleaning port {port}: {e}")
         
         print("[OK] Port cleanup completed")
     
@@ -351,7 +351,7 @@ class DevControlStarter:
         
         # Check dependencies
         if not self.check_dependencies():
-            print("\n❌ Please install missing dependencies and try again")
+            print("\n[ERROR] Please install missing dependencies and try again")
             return False
         
         # Install dependencies
@@ -383,7 +383,7 @@ class DevControlStarter:
 
 def signal_handler(signum, frame):
     """Handle Ctrl+C gracefully"""
-    print("\n🛑 Received interrupt signal, shutting down...")
+    print("\n[INFO] Received interrupt signal, shutting down...")
     starter.kill_dashboard_processes()
     print("Dashboard stopped.")
     sys.exit(0)
@@ -398,9 +398,9 @@ def main():
     success = starter.run()
     
     if success:
-        print("\n🎉 DevControl Dashboard stopped successfully")
+        print("\n[OK] DevControl Dashboard stopped successfully")
     else:
-        print("\n❌ Failed to start DevControl Dashboard")
+        print("\n[ERROR] Failed to start DevControl Dashboard")
         sys.exit(1)
 
 if __name__ == "__main__":

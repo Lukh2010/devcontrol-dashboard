@@ -7,7 +7,7 @@ A sleek, modern dashboard that provides essential control over your development 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- **Python 3.7+** - Backend runtime
+- **Python 3.10+** - Backend runtime
 - **Node.js 16+** - Frontend development server
 - **npm** - Package manager
 

@@ -69,12 +69,12 @@ with open('$PID_FILE', 'w') as f:
 LOCAL_IP=$(hostname -I | awk '{print $1}')
 
 echo ""
-echo "✅ Dashboard wird gestartet..."
-echo "🌐 Erreichbar im Heimnetz unter: http://$LOCAL_IP:3000"
-echo "🔧 Backend API: http://$LOCAL_IP:8000"
-echo "🔌 WebSocket Terminal: ws://$LOCAL_IP:8003"
+echo "[OK] Dashboard wird gestartet..."
+echo "Erreichbar im Heimnetz unter: http://$LOCAL_IP:3000"
+echo "Backend API: http://$LOCAL_IP:8000"
+echo "WebSocket Terminal: ws://$LOCAL_IP:8003"
 echo ""
-echo "📊 Servers laufen. Strg+C zum Beenden."
+echo "[INFO] Servers laufen. Strg+C zum Beenden."
 
 # Browser öffnen
 if command -v xdg-open > /dev/null; then
