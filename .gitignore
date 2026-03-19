@@ -165,7 +165,6 @@ test_*.json
 *_apple.*
 *_final.*
 *_fixed.*
-start.py
 fix_*.ps1
 *.ps1
 
