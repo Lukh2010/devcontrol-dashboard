@@ -12,6 +12,8 @@ import signal
 import platform
 from pathlib import Path
 
+starter = None
+
 class DevControlStarter:
     def __init__(self):
         self.backend_process = None
@@ -111,9 +113,14 @@ class DevControlStarter:
             return False
         
         try:
+            backend_env = os.environ.copy()
+            if backend_env.get("DEVCONTROL_PASSWORD"):
+                backend_env["DEVCONTROL_PASSWORD"] = backend_env["DEVCONTROL_PASSWORD"]
+
             self.backend_process = subprocess.Popen(
                 [sys.executable, '-m', 'flask', 'run', '--host=0.0.0.0', '--port=8000', '--no-debug'],
                 cwd='backend',
+                env=backend_env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
@@ -157,7 +164,7 @@ class DevControlStarter:
         print("\nServers are running. Press Ctrl+C to stop all servers.")
         print("Dashboard: http://localhost:3000")
         print("Backend API: http://localhost:8000")
-        print("WebSocket Terminal: ws://localhost:8002")
+        print("WebSocket Terminal: ws://localhost:8003")
         print("\nReal Terminal ready! Navigate to TERMINAL tab in dashboard.")
         print("\nMonitoring server status...")
         
@@ -390,8 +397,29 @@ def signal_handler(signum, frame):
 
 def main():
     """Main entry point"""
+    global starter
     # Set up signal handler
     signal.signal(signal.SIGINT, signal_handler)
+
+    existing_password = os.environ.get("DEVCONTROL_PASSWORD", "").strip()
+    if existing_password:
+        print("[OK] Using DEVCONTROL_PASSWORD from environment")
+    else:
+        print("[SECURITY] Set a control password for remote actions and terminal access.")
+        while True:
+            password = input("Enter control password (min. 8 chars): ").strip()
+            if len(password) < 8:
+                print("[ERROR] Password must be at least 8 characters long")
+                continue
+
+            confirm_password = input("Confirm control password: ").strip()
+            if password != confirm_password:
+                print("[ERROR] Passwords do not match")
+                continue
+
+            os.environ["DEVCONTROL_PASSWORD"] = password
+            print("[OK] Control password configured")
+            break
     
     # Create and run starter
     starter = DevControlStarter()

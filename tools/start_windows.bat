@@ -8,6 +8,8 @@ if %errorLevel% == 0 (
     echo [OK] Running as Administrator
     echo.
     echo Starting dashboard with admin privileges...
+    echo You will be asked for a control password unless DEVCONTROL_PASSWORD is already set.
+    echo Enter the same password in the frontend to unlock protected actions.
     echo Press Ctrl+C to stop (will clean up automatically)
     echo.
     python start.py

@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Terminal, Minus, Square, Copy } from 'lucide-react';
+import { Terminal, Square, Copy } from 'lucide-react';
 
-const WindowTerminal = () => {
+const WindowTerminal = ({ controlPassword }) => {
   const [connected, setConnected] = useState(false);
   const [output, setOutput] = useState([]);
   const [currentCommand, setCurrentCommand] = useState('');
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [sudoModal, setSudoModal] = useState(null);
-  const [sessionId, setSessionId] = useState('');
   const [workingDir, setWorkingDir] = useState('');
   const terminalRef = useRef(null);
   const inputRef = useRef(null);
@@ -18,16 +17,26 @@ const WindowTerminal = () => {
 
   // WebSocket connection
   useEffect(() => {
+    if (!controlPassword) {
+      setConnected(false);
+      setOutput([{ type: 'system', text: 'Enter the control password to unlock terminal access.' }]);
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      return undefined;
+    }
+
     const connectWebSocket = () => {
       try {
         console.log('Connecting to WebSocket on ws://localhost:8003...');
-        const websocket = new WebSocket(`ws://${window.location.hostname}:8003`);
+        const websocket = new WebSocket(`ws://${window.location.hostname}:8003?password=${encodeURIComponent(controlPassword)}`);
         
         websocket.onopen = () => {
           console.log('WebSocket connected successfully!');
           setConnected(true);
           wsRef.current = websocket;
-          setOutput([{ type: 'system', text: 'Connected to terminal server' }]);
+          addOutput({ type: 'system', text: 'Connected to terminal server' });
         };
         
         websocket.onmessage = (event) => {
@@ -39,7 +48,11 @@ const WindowTerminal = () => {
           console.log('WebSocket disconnected:', event.code, event.reason);
           setConnected(false);
           wsRef.current = null;
-          // Attempt to reconnect after 3 seconds
+          if (event.code === 4401) {
+            addOutput({ type: 'error', text: 'Wrong control password. Update it above to reconnect.' });
+            return;
+          }
+
           reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
         };
         
@@ -68,7 +81,7 @@ const WindowTerminal = () => {
         wsRef.current.close();
       }
     };
-  }, []);
+  }, [controlPassword]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -80,7 +93,6 @@ const WindowTerminal = () => {
   const handleMessage = (message) => {
     switch (message.type) {
       case 'welcome':
-        setSessionId(message.session_id);
         setWorkingDir(message.working_dir);
         addOutput({ type: 'system', text: message.message });
         break;
@@ -146,9 +158,6 @@ const WindowTerminal = () => {
     setHistory(prev => [...prev, { command, timestamp: Date.now() }].slice(-50));
     setHistoryIndex(-1);
     
-    // Add command to output
-    addOutput({ type: 'command', text: `$ ${command}` });
-    
     try {
       // Send command
       wsRef.current.send(JSON.stringify({
@@ -178,9 +187,14 @@ const WindowTerminal = () => {
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
       if (historyIndex !== -1) {
-        const newIndex = Math.min(history.length - 1, historyIndex + 1);
-        setHistoryIndex(newIndex);
-        setCurrentCommand(history[newIndex].command);
+        if (historyIndex >= history.length - 1) {
+          setHistoryIndex(-1);
+          setCurrentCommand('');
+        } else {
+          const newIndex = historyIndex + 1;
+          setHistoryIndex(newIndex);
+          setCurrentCommand(history[newIndex].command);
+        }
       } else {
         setHistoryIndex(-1);
         setCurrentCommand('');
@@ -385,7 +399,7 @@ const WindowTerminal = () => {
               onChange={(e) => setCurrentCommand(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={!connected}
-              placeholder={connected ? "Type command..." : "Connecting..."}
+              placeholder={controlPassword ? (connected ? "Type command..." : "Connecting...") : "Enter control password above"}
               style={{
                 flex: 1,
                 backgroundColor: 'transparent',

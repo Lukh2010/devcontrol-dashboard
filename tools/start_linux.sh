@@ -42,6 +42,31 @@ for group in pids.values():
 # Cleanup bei Strg+C
 trap cleanup EXIT
 
+if [ -z "${DEVCONTROL_PASSWORD:-}" ]; then
+    echo "Setze ein Control-Passwort fuer geschuetzte Aktionen."
+    while true; do
+        read -rsp "Control-Passwort (mindestens 8 Zeichen): " DEVCONTROL_PASSWORD
+        echo
+        if [ ${#DEVCONTROL_PASSWORD} -lt 8 ]; then
+            echo "Passwort ist zu kurz."
+            continue
+        fi
+
+        read -rsp "Passwort bestaetigen: " DEVCONTROL_PASSWORD_CONFIRM
+        echo
+        if [ "$DEVCONTROL_PASSWORD" != "$DEVCONTROL_PASSWORD_CONFIRM" ]; then
+            echo "Passwoerter stimmen nicht ueberein."
+            continue
+        fi
+
+        export DEVCONTROL_PASSWORD
+        unset DEVCONTROL_PASSWORD_CONFIRM
+        break
+    done
+else
+    echo "Verwende DEVCONTROL_PASSWORD aus der Umgebung."
+fi
+
 echo "Starte Backend..."
 cd backend
 python3 app.py &
@@ -73,6 +98,7 @@ echo "[OK] Dashboard wird gestartet..."
 echo "Erreichbar im Heimnetz unter: http://$LOCAL_IP:3000"
 echo "Backend API: http://$LOCAL_IP:8000"
 echo "WebSocket Terminal: ws://$LOCAL_IP:8003"
+echo "Control-Passwort im Frontend eingeben, um geschuetzte Aktionen freizuschalten."
 echo ""
 echo "[INFO] Servers laufen. Strg+C zum Beenden."
 

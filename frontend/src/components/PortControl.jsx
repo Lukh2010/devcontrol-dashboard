@@ -50,14 +50,14 @@ const styles = {
   }
 };
 
-const PortControl = () => {
+const PortControl = ({ controlPassword }) => {
   const [ports, setPorts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
 
   useEffect(() => {
     fetchPorts();
-    const interval = setInterval(fetchPorts, 12000); // Refresh every 12 seconds (less frequent)
+    const interval = setInterval(fetchPorts, 12000);
     return () => clearInterval(interval);
   }, []);
 
@@ -76,34 +76,26 @@ const PortControl = () => {
   const killProcess = async (port) => {
     try {
       const response = await fetch(`/api/port/${port}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: {
+          'X-DevControl-Password': controlPassword || ''
+        }
       });
-      
+
+      const result = await response.json();
+
       if (response.ok) {
-        const result = await response.json();
-        setMessage(`✓ ${result.message}`);
-        fetchPorts(); // Refresh the list
-        setTimeout(() => setMessage(''), 3000);
+        setMessage(`Success: ${result.message}`);
+        fetchPorts();
       } else {
-        const error = await response.json();
-        setMessage(`✗ Error: ${error.detail}`);
-        setTimeout(() => setMessage(''), 3000);
+        setMessage(`Error: ${result.error || 'Unknown error'}`);
       }
+
+      setTimeout(() => setMessage(''), 3000);
     } catch (error) {
-      setMessage(`✗ Network error: ${error.message}`);
+      setMessage(`Network error: ${error.message}`);
       setTimeout(() => setMessage(''), 3000);
     }
-  };
-
-  const getPortStatus = (port) => {
-    const commonPorts = {
-      20: 'FTP Data', 21: 'FTP Control', 22: 'SSH', 23: 'Telnet',
-      25: 'SMTP', 53: 'DNS', 80: 'HTTP', 110: 'POP3',
-      143: 'IMAP', 443: 'HTTPS', 993: 'IMAPS', 995: 'POP3S',
-      3000: 'Dev Server', 8000: 'Dev Server', 8080: 'HTTP Alt',
-      5432: 'PostgreSQL', 3306: 'MySQL', 6379: 'Redis'
-    };
-    return commonPorts[port] || 'Custom';
   };
 
   if (loading) {
@@ -111,7 +103,7 @@ const PortControl = () => {
       <div style={styles.card}>
         <div style={styles.cardHeader}>
           <h2 style={styles.cardTitle}>
-            <Network style={{width: '20px', height: '20px'}} />
+            <Network style={{ width: '20px', height: '20px' }} />
             Port Control
           </h2>
         </div>
@@ -126,13 +118,18 @@ const PortControl = () => {
     <div style={styles.card}>
       <div style={styles.cardHeader}>
         <h2 style={styles.cardTitle}>
-          <Network style={{width: '20px', height: '20px'}} />
+          <Network style={{ width: '20px', height: '20px' }} />
           Port Control
         </h2>
       </div>
       <div style={styles.cardContent}>
+        {message && (
+          <div style={{ marginBottom: '12px', color: message.startsWith('Success:') ? '#155724' : '#721c24' }}>
+            {message}
+          </div>
+        )}
         {ports.length === 0 ? (
-          <div style={{textAlign: 'center', padding: '40px 0', color: '#6c757d'}}>
+          <div style={{ textAlign: 'center', padding: '40px 0', color: '#6c757d' }}>
             No active listening ports found
           </div>
         ) : (
@@ -146,8 +143,8 @@ const PortControl = () => {
               </tr>
             </thead>
             <tbody>
-              {ports.slice(0, 10).map((portInfo, index) => (
-                <tr key={index}>
+              {ports.slice(0, 10).map((portInfo) => (
+                <tr key={`${portInfo.port}-${portInfo.pid}`}>
                   <td style={styles.tableCell}>
                     <strong>{portInfo.port}</strong>
                   </td>

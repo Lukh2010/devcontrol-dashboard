@@ -10,6 +10,9 @@ import websockets
 import json
 import threading
 import os
+import hmac
+from pathlib import Path
+from urllib.parse import parse_qs
 from terminal_session import TerminalSessionManager
 
 app = Flask(__name__)
@@ -21,6 +24,51 @@ terminal_manager = TerminalSessionManager()
 # Global CPU measurement cache
 cpu_cache = {}
 last_cpu_update = 0
+
+PROTECTED_ENDPOINTS_MESSAGE = "Protected action requires the launcher control password"
+
+def get_configured_password():
+    """Return the configured control password."""
+    return os.environ.get("DEVCONTROL_PASSWORD", "").strip()
+
+def verify_control_password(password: str) -> bool:
+    """Constant-time password verification for protected actions."""
+    configured_password = get_configured_password()
+    if not configured_password or not password:
+        return False
+    return hmac.compare_digest(password, configured_password)
+
+def require_control_password():
+    """Validate the control password sent with HTTP requests."""
+    configured_password = get_configured_password()
+    if not configured_password:
+        return jsonify({
+            "error": "Control password is not configured on the server"
+        }), 503
+
+    provided_password = request.headers.get("X-DevControl-Password", "")
+    if not verify_control_password(provided_password):
+        return jsonify({"error": PROTECTED_ENDPOINTS_MESSAGE}), 401
+
+    return None
+
+def load_dashboard_pids():
+    """Load dashboard-managed PIDs from the shared PID file."""
+    pid_file = Path.home() / '.devcontrol_pids.json'
+    if not pid_file.exists():
+        return {}
+
+    try:
+        with open(pid_file, 'r') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def is_dashboard_pid(pid: int) -> bool:
+    """Check whether a PID is owned by this dashboard."""
+    dashboard_pids = load_dashboard_pids()
+    pid_str = str(pid)
+    return any(pid_str in dashboard_pids.get(group, []) for group in ('backend', 'frontend', 'websocket'))
 
 def update_cpu_cache():
     """Update global CPU measurement cache"""
@@ -53,6 +101,16 @@ def update_cpu_cache():
 async def handle_websocket(websocket, path):
     """Handle WebSocket connections for terminal sessions"""
     try:
+        query_params = parse_qs((path or '').split('?', 1)[1] if '?' in (path or '') else '')
+        provided_password = query_params.get('password', [''])[0]
+        if not verify_control_password(provided_password):
+            await websocket.send(json.dumps({
+                'type': 'error',
+                'message': PROTECTED_ENDPOINTS_MESSAGE
+            }))
+            await websocket.close(code=4401, reason='Unauthorized')
+            return
+
         session_id = await terminal_manager.create_session(websocket)
         
         async for message in websocket:
@@ -146,7 +204,7 @@ def api_docs():
             "/api/processes": "Get running processes with CPU and memory usage",
             "/api/ports": "Get active network ports and listening services",
             "/api/network/info": "Get network interface information",
-            "/api/network/ping": "Ping a host (POST with hostname)",
+            "/api/network/ping": "Ping a host (POST with host)",
             "/api/commands/run": "Execute system command (POST with command)"
         },
         "methods": {
@@ -157,7 +215,7 @@ def api_docs():
             "ping_command": {
                 "url": "/api/network/ping",
                 "method": "POST",
-                "body": {"hostname": "google.com"}
+                "body": {"host": "google.com"}
             },
             "run_command": {
                 "url": "/api/commands/run", 
@@ -282,9 +340,18 @@ def get_ports():
 def kill_process_by_port(port):
     """Kill process using the specified port"""
     try:
+        auth_error = require_control_password()
+        if auth_error:
+            return auth_error
+
         for conn in psutil.net_connections():
             if conn.status == 'LISTEN' and conn.laddr.port == port:
                 try:
+                    if not conn.pid or not is_dashboard_pid(conn.pid):
+                        return jsonify({
+                            "error": f"Port {port} is not owned by a dashboard-managed process"
+                        }), 403
+
                     process = psutil.Process(conn.pid)
                     process.terminate()
                     return jsonify({"message": f"Process {process.name()} (PID: {conn.pid}) terminated successfully"})
@@ -299,6 +366,10 @@ def kill_process_by_port(port):
 def run_command():
     """Execute a custom command"""
     try:
+        auth_error = require_control_password()
+        if auth_error:
+            return auth_error
+
         data = request.get_json()
         command = data.get('command', '')
         name = data.get('name', '')
@@ -468,6 +539,10 @@ def ping_host():
 def kill_process(pid):
     """Kill a specific process (admin only)"""
     try:
+        auth_error = require_control_password()
+        if auth_error:
+            return auth_error
+
         # Check admin privileges on Windows
         if platform.system() == 'Windows':
             try:
@@ -491,29 +566,7 @@ def kill_process(pid):
         except psutil.NoSuchProcess:
             return jsonify({"error": f"Process {pid} not found"}), 404
         
-        # Load dashboard PIDs to check if this is a dashboard process
-        from pathlib import Path
-        import json
-        
-        pid_file = Path.home() / '.devcontrol_pids.json'
-        dashboard_pids = {}
-        
-        if pid_file.exists():
-            try:
-                with open(pid_file, 'r') as f:
-                    dashboard_pids = json.load(f)
-            except:
-                pass
-        
-        # Check if this PID belongs to dashboard
-        is_dashboard_process = (
-            str(pid) in dashboard_pids.get('backend', []) or
-            str(pid) in dashboard_pids.get('frontend', []) or
-            str(pid) in dashboard_pids.get('websocket', [])
-        )
-        
-        # Allow killing dashboard processes or admin can kill any process
-        if not is_dashboard_process and platform.system() != 'Windows':
+        if not is_dashboard_pid(pid):
             return jsonify({
                 "error": "Can only kill dashboard processes",
                 "message": f"Process {pid} ({process_name}) is not a dashboard process"

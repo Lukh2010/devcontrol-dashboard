@@ -1,213 +1,168 @@
-# 🎮 DevControl Dashboard
+# DevControl Dashboard
 
-**Modern Apple-Style System Monitoring & Control Center**
+Modern local dashboard for system monitoring, process control, port control, network inspection, and password-protected terminal access.
 
-A sleek, modern dashboard that provides essential control over your development environment with Apple-inspired design, real-time system monitoring, port management, process control, and network analysis.
+## Requirements
 
-## 🚀 Quick Start
+- Python 3.10+
+- Node.js 16+
+- npm
 
-### Prerequisites
-- **Python 3.10+** - Backend runtime
-- **Node.js 16+** - Frontend development server
-- **npm** - Package manager
+## Quick Start
 
-### Quick Start
+### Windows
 
-Choose your platform-specific script below for the best experience:
+Run the Windows launcher as Administrator:
 
-#### Windows
-```bash
-# Run as Administrator for full functionality
-tools/start_windows.bat
+```bat
+tools\start_windows.bat
 ```
 
-#### Linux
-```bash
-# Full-featured start script with PID management
-./tools/start_linux.sh
-```
+Behavior:
 
-### Admin Commands (Windows)
-For system administrator commands like `net sess`, run with elevated privileges:
+- Starts backend on `http://127.0.0.1:8000`
+- Starts frontend on `http://127.0.0.1:3000`
+- Starts terminal WebSocket on `ws://127.0.0.1:8003`
+- Prompts for a control password if `DEVCONTROL_PASSWORD` is not already set
 
-**Method 1: Batch File (Easiest)**
-1. **Right-click `tools/start_windows.bat`** → "Run as administrator"
-2. **Dashboard starts automatically** with admin rights
+You must enter the same control password in the frontend to unlock:
 
-### Linux Start
-For Linux systems, use the dedicated start script:
+- terminal access
+- custom command execution
+- process termination
+- port termination
 
-**Method 1: Start Script (Recommended)**
+### Linux
+
+Run the Linux launcher:
+
 ```bash
 chmod +x tools/start_linux.sh
 ./tools/start_linux.sh
 ```
 
-This script will:
-- ✅ Start backend and frontend in background
-- ✅ Save PIDs for clean shutdown
-- ✅ Show local network IP for mobile access
-- ✅ Open browser automatically
+The Linux launcher now prompts for a control password and exports it as `DEVCONTROL_PASSWORD` before starting the backend.
 
-## 📁 Project Structure
+### Manual Start
 
-```
-devcontrol-dashboard/
-├── 📄 README.md                 # Main documentation
-├── 📁 backend/                 # Flask API server
-│   ├── 📄 app.py               # Main Flask application
-│   └── 📄 terminal_session.py  # WebSocket terminal handler
-├── 📁 frontend/                # React frontend
-│   ├── 📁 src/                 # React components
-│   ├── 📄 package.json         # Node.js dependencies
-│   └── 📄 vite.config.js       # Vite configuration
-├── 📁 tools/                   # Utility scripts
-│   ├── 🧹 cleanup_ports.bat    # Windows port cleanup
-│   ├── 🧹 cleanup_ports.py     # Python port cleanup
-│   ├── 🧹 cleanup_ports.sh     # Unix port cleanup
-│   ├── 🔧 start_windows.bat     # Windows launcher
-│   └── 🔧 start_linux.sh       # Linux launcher
-```
+Backend:
 
-## 🌐 Features
-
-### Core Monitoring
-- **System Monitor** - CPU, memory, disk usage in real-time
-- **Process Monitor** - View and manage running processes
-- **Port Control** - Monitor and manage network ports
-- **Network Hub** - Network interface information and tools
-
-### Advanced Features
-- **Terminal Sessions** - WebSocket-based terminal access
-- **Admin Commands** - System administrator commands (Windows)
-- **Real-time Updates** - Auto-refreshing data
-- **Apple-Style UI** - Modern, clean interface
-
-## 🛠️ Troubleshooting
-
-### Common Issues
-
-**"Port already in use"**
-- Run `tools/cleanup_ports.bat` (Windows) or `tools/cleanup_ports.sh` (Unix)
-- This will clean up ports 3000, 8000, and 8003
-
-**"Administrator privileges required"**
-- Run `tools/start_windows.bat` as administrator
-- Right-click → "Run as administrator"
-
-**"Dependencies not found"**
-- Install dependencies manually:
-  ```bash
-  cd backend && pip install -r requirements.txt
-  cd frontend && npm install
-  ```
-- Make sure Python and Node.js are in your PATH
-
-**"Dashboard won't start"**
-- Check if ports 3000, 8000, or 8003 are occupied
-- Run the cleanup script and try again
-- If issues persist, try restarting your system
-
-### Port Cleanup
-
-**Windows:**
 ```bash
-# Double-click or run:
+cd backend
+python app.py
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm run dev -- --host 127.0.0.1
+```
+
+If you start the backend manually, set a password first:
+
+```bash
+set DEVCONTROL_PASSWORD=your-password
+```
+
+PowerShell:
+
+```powershell
+$env:DEVCONTROL_PASSWORD = "your-password"
+```
+
+Bash:
+
+```bash
+export DEVCONTROL_PASSWORD="your-password"
+```
+
+## Security Model
+
+Protected actions require the launcher control password. The frontend sends it to the backend using the `X-DevControl-Password` header, and the terminal WebSocket requires it at connect time.
+
+Protected actions:
+
+- `/api/commands/run`
+- `/api/port/<port>`
+- `/api/processes/<pid>/kill`
+- WebSocket terminal access on port `8003`
+
+Current safeguards:
+
+- password gate for sensitive actions
+- dashboard-owned process restriction for process and port termination
+- dangerous-command filtering in terminal and command execution paths
+- admin check for Windows process termination
+
+Current limitations:
+
+- the backend still binds to `0.0.0.0`
+- Windows command execution still uses `shell=True` for compatibility
+- there is no user/session system, only a shared control password
+- there are no rate limits
+
+Use this project only on a trusted local network. Do not expose it to the public internet.
+
+## Project Structure
+
+```text
+devcontrol-dashboard/
+|-- backend/
+|   |-- app.py
+|   |-- command_classifier.py
+|   |-- requirements.txt
+|   `-- terminal_session.py
+|-- frontend/
+|   |-- package.json
+|   |-- vite.config.js
+|   `-- src/
+|-- tools/
+|   |-- cleanup_ports.bat
+|   |-- cleanup_ports.py
+|   |-- cleanup_ports.sh
+|   |-- start_linux.sh
+|   `-- start_windows.bat
+`-- start.py
+```
+
+## Troubleshooting
+
+### Ports already in use
+
+Use one of:
+
+```bat
 tools\cleanup_ports.bat
 ```
 
-**Linux:**
 ```bash
-# Make executable and run:
-chmod +x tools/cleanup_ports.sh
 ./tools/cleanup_ports.sh
 ```
 
-**Python Script (All Platforms):**
 ```bash
 python tools/cleanup_ports.py
 ```
 
-## 🔒 Security
+### Frontend fails with `spawn EPERM`
 
-This dashboard includes comprehensive security measures:
-- **Command validation** - Blocks dangerous system commands
-- **Input sanitization** - Prevents shell injection attacks
-- **Admin privilege checks** - Verifies administrator rights
-- **Home network access** - Accessible on LAN, not exposed to internet
-- **No data persistence** - No data is stored or transmitted
+That is an environment/process-spawn restriction, usually caused by sandboxing or host policy, not by the React code itself. Run the frontend outside the sandbox or from a normal local terminal.
 
+### Protected actions return `401`
 
-## 📊 Performance
+The frontend password does not match the backend `DEVCONTROL_PASSWORD`. Re-enter the same password used during launch.
 
-The dashboard is optimized for performance:
-- **Fast CPU measurement** - Global cache updated every second
-- **Optimized refresh intervals** - Reduced API call frequency
-- **Efficient data processing** - Minimal system impact
-- **Lightweight frontend** - Fast loading and responsive UI
+### Process controls do not work on Windows
 
-## 🎯 Platform Support
+Run the dashboard as Administrator.
 
-### Windows
-- ✅ Full support with admin commands
-- ✅ Batch file launchers
-- ✅ PowerShell compatibility
-- ✅ Process management
+## Development Notes
 
-### Linux
-- ✅ Full support with sudo commands
-- ✅ Shell script launchers (start_linux.sh)
-- ✅ Terminal compatibility
-- ✅ Unix process management
-- ✅ Mobile access with local IP detection
+- Frontend dev server: Vite
+- Backend API: Flask
+- System/process metrics: psutil
+- Terminal transport: websockets
 
-## 🤝 Contributing
+## License
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- **Flask** - Backend API framework
-- **React** - Frontend framework
-- **Vite** - Build tool and development server
-- **psutil** - System monitoring library
-- **Tailwind CSS** - Utility-first CSS framework
-
-## ⚠️ Sicherheit & Datenschutz (Privatnutzung)
-
-Dieses Dashboard ist ausschließlich für den Einsatz im privaten Heimnetz konzipiert. Folgende Sicherheitsaspekte sind bewusst vereinfacht:
-
-### Bekannte offene Punkte
-| Risiko | Auswirkung | Empfehlung |
-|--------|-----------|------------|
-| Keine Authentifizierung | Jeder im Heimnetz kann das Dashboard nutzen | Nur im eigenen WLAN betreiben |
-| API bindet auf 0.0.0.0 | Erreichbar von allen Netzwerkgeräten | Kein Port-Forwarding einrichten |
-| shell=True für Windows-Befehle | Bei manipuliertem Input möglich Command Injection | Nur vertrauenswürdige Personen ins Netz lassen |
-| Keine Rate Limits | Theoretisch DoS aus dem Heimnetz möglich | Irrelevant bei privatem Heimnetz |
-| Terminal hat Admin-Rechte | Befehle laufen mit vollen Systemrechten | Dashboard nicht im Büro oder öffentlichem WLAN starten |
-| Ping erlaubt private IPs | Netzwerk-Scan im Heimnetz möglich | Gewollt — für Router/NAS-Zugriff |
-| Process Kill UI | Prozesse können über UI gekillt werden | Nur mit Admin-Rechten nutzen |
-
-### Was NICHT passieren kann
-- ✅ Kein Internetzugriff auf das Dashboard (kein Port-Forwarding)
-- ✅ Keine Datenspeicherung oder -übertragung nach außen
-- ✅ Keine wirklich destruktiven Befehle (rm -rf /, format) werden ohne Bestätigung ausgeführt
-- ✅ Keine system-weiten Prozess-Kills (nur eigene Dashboard-Prozesse)
-
-### Empfohlene Nutzung
-- Im privaten Heimnetz mit WPA2/WPA3 WLAN
-- Nicht in öffentlichen Netzwerken starten
-- Nicht dauerhaft als Dienst/Autostart laufen lassen
-- Process Manager nur als Admin verwenden
-
----
-
-*Built with precision for developers who demand control and style.* 🍎⚡
+MIT. See [LICENSE](LICENSE).

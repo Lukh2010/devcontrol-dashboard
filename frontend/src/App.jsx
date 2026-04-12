@@ -45,8 +45,8 @@ const styles = {
     gap: '20px'
   },
   grid2: { gridTemplateColumns: 'repeat(2, 1fr)' },
-  grid3: { gridTemplateColumns: 'repeat(3, 1fr)' },
-  grid4: { gridTemplateColumns: 'repeat(4, 1fr)' },
+  grid3: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' },
+  grid4: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)' },
   metricCard: {
     backgroundColor: '#f8f9fa',
     borderRadius: '8px',
@@ -130,6 +130,7 @@ function App() {
   const [systemInfo, setSystemInfo] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [activePanel, setActivePanel] = useState('overview');
+  const [controlPassword, setControlPassword] = useState(() => sessionStorage.getItem('devcontrol-password') || '');
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -160,6 +161,15 @@ function App() {
     });
   };
 
+  const handlePasswordChange = (value) => {
+    setControlPassword(value);
+    if (value) {
+      sessionStorage.setItem('devcontrol-password', value);
+    } else {
+      sessionStorage.removeItem('devcontrol-password');
+    }
+  };
+
   return (
     <div style={styles.container}>
       <div style={{...styles.card, marginBottom: '24px'}}>
@@ -188,7 +198,31 @@ function App() {
       </div>
 
       <div style={{...styles.card, marginBottom: '24px'}}>
+        <div style={styles.cardHeader}>
+          <h2 style={styles.cardTitle}>Control Access</h2>
+        </div>
         <div style={styles.cardContent}>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '16px' }}>
+            <input
+              type="password"
+              value={controlPassword}
+              onChange={(e) => handlePasswordChange(e.target.value)}
+              placeholder="Enter control password from launcher"
+              style={{
+                flex: '1 1 320px',
+                backgroundColor: '#ffffff',
+                border: '1px solid rgba(0, 0, 0, 0.2)',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                fontSize: '14px',
+                minHeight: '44px',
+                boxSizing: 'border-box'
+              }}
+            />
+            <div style={{ fontSize: '12px', color: controlPassword ? '#155724' : '#856404' }}>
+              {controlPassword ? 'Password loaded for protected actions.' : 'Protected actions stay locked until you enter the launch password.'}
+            </div>
+          </div>
           <div style={{display: 'flex', gap: '4px', flexWrap: 'wrap'}}>
             {[
               { id: 'overview', label: 'Overview', icon: Activity },
@@ -244,12 +278,12 @@ function App() {
         {activePanel === 'overview' && (
           <>
             <SystemMonitor />
-            <PortControl />
+            <PortControl controlPassword={controlPassword} />
           </>
         )}
-        {activePanel === 'ports' && <PortControl />}
-        {activePanel === 'process-manager' && <ProcessManager />}
-        {activePanel === 'commands' && <WindowTerminal />}
+        {activePanel === 'ports' && <PortControl controlPassword={controlPassword} />}
+        {activePanel === 'process-manager' && <ProcessManager controlPassword={controlPassword} />}
+        {activePanel === 'commands' && <WindowTerminal controlPassword={controlPassword} />}
         {activePanel === 'network' && <NetworkHub />}
       </div>
     </div>

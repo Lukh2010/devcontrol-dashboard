@@ -28,7 +28,7 @@ const styles = {
   cardContent: {
     padding: '20px'
   },
-  grid3: { gridTemplateColumns: 'repeat(3, 1fr)' },
+  grid3: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' },
   metricCard: {
     backgroundColor: '#f8f9fa',
     borderRadius: '8px',

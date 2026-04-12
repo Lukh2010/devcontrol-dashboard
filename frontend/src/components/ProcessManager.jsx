@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Cpu, Trash2, RefreshCw, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Cpu, Trash2, RefreshCw, AlertTriangle } from 'lucide-react';
 
-const ProcessManager = () => {
+const ProcessManager = ({ controlPassword }) => {
   const [processes, setProcesses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -212,7 +212,8 @@ const ProcessManager = () => {
       const response = await fetch(`/api/processes/${pid}/kill`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'X-DevControl-Password': controlPassword || ''
         }
       });
       
