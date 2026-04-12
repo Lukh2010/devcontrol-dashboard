@@ -1,141 +1,36 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Cpu, Network, Terminal, Wifi } from 'lucide-react';
+import { Activity, Cpu, Network, Shield, Terminal, Wifi } from 'lucide-react';
 import SystemMonitor from './components/SystemMonitor';
 import PortControl from './components/PortControl';
 import NetworkHub from './components/NetworkHub';
 import WindowTerminal from './components/WindowTerminal';
 import ProcessManager from './components/ProcessManager';
 
-const styles = {
-  container: {
-    minHeight: '100vh',
-    backgroundColor: '#ffffff',
-    color: '#1d1d1f',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-    padding: '20px'
-  },
-  card: {
-    backgroundColor: '#ffffff',
-    borderRadius: '12px',
-    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.07)',
-    border: '1px solid rgba(0, 0, 0, 0.1)',
-    marginBottom: '20px'
-  },
-  cardHeader: {
-    padding: '16px 20px',
-    borderBottom: '1px solid rgba(0, 0, 0, 0.1)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between'
-  },
-  cardTitle: {
-    fontSize: '18px',
-    fontWeight: '600',
-    color: '#1d1d1f',
-    margin: 0,
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px'
-  },
-  cardContent: {
-    padding: '20px'
-  },
-  grid: {
-    display: 'grid',
-    gap: '20px'
-  },
-  grid2: { gridTemplateColumns: 'repeat(2, 1fr)' },
-  grid3: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' },
-  grid4: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)' },
-  metricCard: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: '8px',
-    padding: '16px',
-    textAlign: 'center',
-    border: '1px solid rgba(0, 0, 0, 0.1)'
-  },
-  metricValue: {
-    fontSize: '32px',
-    fontWeight: '700',
-    color: '#1d1d1f',
-    marginBottom: '4px'
-  },
-  metricLabel: {
-    fontSize: '12px',
-    color: '#6c757d',
-    fontWeight: '500'
-  },
-  button: {
-    backgroundColor: '#007aff',
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: '8px',
-    padding: '10px 16px',
-    fontSize: '14px',
-    fontWeight: '500',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '6px',
-    minWidth: '44px',
-    minHeight: '44px',
-    touchAction: 'manipulation'
-  },
-  navButton: {
-    backgroundColor: 'transparent',
-    color: '#6c757d',
-    border: 'none',
-    borderRadius: '8px',
-    padding: '10px 12px',
-    fontSize: '14px',
-    fontWeight: '500',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    minWidth: '44px',
-    minHeight: '44px',
-    touchAction: 'manipulation'
-  },
-  navButtonActive: {
-    backgroundColor: '#007aff',
-    color: '#ffffff'
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse'
-  },
-  tableCell: {
-    padding: '12px 16px',
-    textAlign: 'left',
-    borderBottom: '1px solid rgba(0, 0, 0, 0.05)',
-    fontSize: '13px'
-  },
-  progressBar: {
-    width: '100%',
-    height: '4px',
-    backgroundColor: '#e9ecef',
-    borderRadius: '2px',
-    overflow: 'hidden'
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#007aff',
-    transition: 'width 0.3s ease'
-  }
-};
+const PANELS = [
+  { id: 'overview', label: 'Overview', icon: Activity },
+  { id: 'ports', label: 'Ports', icon: Network },
+  { id: 'process-manager', label: 'Processes', icon: Cpu },
+  { id: 'commands', label: 'Terminal', icon: Terminal },
+  { id: 'network', label: 'Network', icon: Wifi }
+];
 
 function App() {
   const [systemInfo, setSystemInfo] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [activePanel, setActivePanel] = useState('overview');
   const [controlPassword, setControlPassword] = useState(() => sessionStorage.getItem('devcontrol-password') || '');
+  const [authState, setAuthState] = useState(controlPassword ? 'checking' : 'idle');
+  const [performanceData, setPerformanceData] = useState(null);
+  const [ports, setPorts] = useState([]);
+  const [portsLoading, setPortsLoading] = useState(true);
+  const [processes, setProcesses] = useState([]);
+  const [processesLoading, setProcessesLoading] = useState(true);
+  const [networkInfo, setNetworkInfo] = useState(null);
+  const [networkLoading, setNetworkLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
 
     const fetchSystemInfo = async () => {
       try {
@@ -152,14 +47,132 @@ function App() {
     return () => clearInterval(timer);
   }, []);
 
-  const formatTime = (date) => {
-    return date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true 
-    });
-  };
+  useEffect(() => {
+    const fetchPerformance = async () => {
+      try {
+        const response = await fetch('/api/system/performance');
+        const data = await response.json();
+        setPerformanceData(data);
+      } catch (error) {
+        console.error('Failed to fetch performance data:', error);
+      }
+    };
+
+    fetchPerformance();
+    const interval = setInterval(fetchPerformance, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const fetchPorts = async () => {
+      try {
+        const response = await fetch('/api/ports');
+        const data = await response.json();
+        setPorts(data);
+      } catch (error) {
+        console.error('Failed to fetch ports:', error);
+      } finally {
+        setPortsLoading(false);
+      }
+    };
+
+    fetchPorts();
+    const interval = setInterval(fetchPorts, 12000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const fetchProcesses = async () => {
+      try {
+        const response = await fetch('/api/processes');
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        const data = await response.json();
+        setProcesses(data);
+      } catch (error) {
+        console.error('Failed to fetch processes:', error);
+      } finally {
+        setProcessesLoading(false);
+      }
+    };
+
+    fetchProcesses();
+    const interval = setInterval(fetchProcesses, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const fetchNetworkInfo = async () => {
+      try {
+        const response = await fetch('/api/network/info');
+        const data = await response.json();
+        setNetworkInfo(data);
+      } catch (error) {
+        console.error('Failed to fetch network info:', error);
+      } finally {
+        setNetworkLoading(false);
+      }
+    };
+
+    fetchNetworkInfo();
+    const interval = setInterval(fetchNetworkInfo, 20000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const fetchAdminState = async () => {
+      try {
+        const response = await fetch('/api/system/is-admin');
+        if (!response.ok) {
+          setIsAdmin(false);
+          return;
+        }
+        const data = await response.json();
+        setIsAdmin(Boolean(data.is_admin));
+      } catch {
+        setIsAdmin(false);
+      }
+    };
+
+    fetchAdminState();
+  }, []);
+
+  useEffect(() => {
+    if (!controlPassword) {
+      setAuthState('idle');
+      return undefined;
+    }
+
+    let cancelled = false;
+    setAuthState('checking');
+
+    const timeoutId = setTimeout(async () => {
+      try {
+        const response = await fetch('/api/auth/validate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ password: controlPassword })
+        });
+
+        const data = await response.json();
+        if (!cancelled) {
+          setAuthState(response.ok && data.valid ? 'valid' : 'invalid');
+        }
+      } catch {
+        if (!cancelled) {
+          setAuthState('error');
+        }
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [controlPassword]);
 
   const handlePasswordChange = (value) => {
     setControlPassword(value);
@@ -170,122 +183,188 @@ function App() {
     }
   };
 
-  return (
-    <div style={styles.container}>
-      <div style={{...styles.card, marginBottom: '24px'}}>
-        <div style={styles.cardHeader}>
-          <div style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
-            <h1 style={{fontSize: '24px', fontWeight: '700', color: '#1d1d1f', margin: 0}}>
-              DevControl Dashboard
-            </h1>
-          </div>
-          <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
-            <span style={{
-              backgroundColor: '#d4edda',
-              color: '#155724',
-              padding: '4px 8px',
-              borderRadius: '6px',
-              fontSize: '11px',
-              fontWeight: '500'
-            }}>
-              System Online
-            </span>
-            <span style={{fontSize: '14px', color: '#6c757d'}}>
-              {formatTime(currentTime)}
-            </span>
-          </div>
-        </div>
-      </div>
+  const formatTime = (date) => date.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  });
 
-      <div style={{...styles.card, marginBottom: '24px'}}>
-        <div style={styles.cardHeader}>
-          <h2 style={styles.cardTitle}>Control Access</h2>
+  const accessBadgeClass = authState === 'valid'
+    ? 'status-success'
+    : authState === 'checking'
+      ? 'status-warning'
+      : authState === 'invalid' || authState === 'error'
+        ? 'status-danger'
+        : 'status-warning';
+
+  const accessBadgeText = authState === 'valid'
+    ? 'Unlocked'
+    : authState === 'checking'
+      ? 'Checking'
+      : authState === 'invalid'
+        ? 'Rejected'
+        : authState === 'error'
+          ? 'Offline'
+          : 'Locked';
+
+  const passwordHint = authState === 'valid'
+    ? 'Password verified.'
+    : authState === 'checking'
+      ? 'Verifying password.'
+      : authState === 'invalid'
+        ? 'Password does not match the backend.'
+        : authState === 'error'
+          ? 'Backend unavailable for validation.'
+          : 'Enter the startup password to unlock protected actions.';
+
+  const renderContent = () => {
+    if (activePanel === 'overview') {
+      return (
+        <div className="workspace-overview">
+          <SystemMonitor performanceData={performanceData} />
+          <PortControl
+            controlPassword={controlPassword}
+            ports={ports}
+            loading={portsLoading}
+            onRefresh={async () => {
+              const response = await fetch('/api/ports');
+              const data = await response.json();
+              setPorts(data);
+              setPortsLoading(false);
+            }}
+          />
         </div>
-        <div style={styles.cardContent}>
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '16px' }}>
+      );
+    }
+
+    if (activePanel === 'ports') {
+      return (
+        <div className="workspace-single">
+          <PortControl
+            controlPassword={controlPassword}
+            ports={ports}
+            loading={portsLoading}
+            onRefresh={async () => {
+              const response = await fetch('/api/ports');
+              const data = await response.json();
+              setPorts(data);
+              setPortsLoading(false);
+            }}
+          />
+        </div>
+      );
+    }
+
+    if (activePanel === 'process-manager') {
+      return (
+        <div className="workspace-single">
+          <ProcessManager
+            controlPassword={controlPassword}
+            processes={processes}
+            loading={processesLoading}
+            isAdmin={isAdmin}
+            onRefresh={async () => {
+              const response = await fetch('/api/processes');
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+              }
+              const data = await response.json();
+              setProcesses(data);
+              setProcessesLoading(false);
+            }}
+          />
+        </div>
+      );
+    }
+
+    if (activePanel === 'commands') {
+      return (
+        <div className="workspace-single">
+          <WindowTerminal controlPassword={controlPassword} />
+        </div>
+      );
+    }
+
+    return (
+      <div className="workspace-single">
+        <NetworkHub
+          networkInfo={networkInfo}
+          loading={networkLoading}
+          onRefresh={async () => {
+            const response = await fetch('/api/network/info');
+            const data = await response.json();
+            setNetworkInfo(data);
+            setNetworkLoading(false);
+          }}
+        />
+      </div>
+    );
+  };
+
+  return (
+    <div className="app-shell compact-shell">
+      <header className="topbar">
+        <div>
+          <div className="topbar-kicker">DevControl</div>
+          <h1 className="topbar-title">Local Control Dashboard</h1>
+        </div>
+        <div className="topbar-meta">
+          <div className="topbar-chip">
+            <span className={`status-badge ${accessBadgeClass}`}>{accessBadgeText}</span>
+          </div>
+          <div className="topbar-chip">{formatTime(currentTime)}</div>
+        </div>
+      </header>
+
+      <section className="toolbar-panel panel">
+        <div className="toolbar-row">
+          <div className="toolbar-block">
+            <label className="field-label" htmlFor="control-password">Control Password</label>
             <input
+              id="control-password"
+              className="input compact-input"
               type="password"
               value={controlPassword}
-              onChange={(e) => handlePasswordChange(e.target.value)}
-              placeholder="Enter control password from launcher"
-              style={{
-                flex: '1 1 320px',
-                backgroundColor: '#ffffff',
-                border: '1px solid rgba(0, 0, 0, 0.2)',
-                borderRadius: '8px',
-                padding: '10px 14px',
-                fontSize: '14px',
-                minHeight: '44px',
-                boxSizing: 'border-box'
-              }}
+              onChange={(event) => handlePasswordChange(event.target.value)}
+              placeholder="Enter startup password"
             />
-            <div style={{ fontSize: '12px', color: controlPassword ? '#155724' : '#856404' }}>
-              {controlPassword ? 'Password loaded for protected actions.' : 'Protected actions stay locked until you enter the launch password.'}
-            </div>
+            <div className="input-hint">{passwordHint}</div>
           </div>
-          <div style={{display: 'flex', gap: '4px', flexWrap: 'wrap'}}>
-            {[
-              { id: 'overview', label: 'Overview', icon: Activity },
-              { id: 'ports', label: 'Port Control', icon: Network },
-              { id: 'process-manager', label: 'Processes', icon: Cpu },
-              { id: 'commands', label: 'Terminal', icon: Terminal },
-              { id: 'network', label: 'Network', icon: Wifi },
-            ].map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => setActivePanel(id)}
-                style={{
-                  ...styles.navButton,
-                  ...(activePanel === id ? styles.navButtonActive : {})
-                }}
-              >
-                <Icon style={{width: '16px', height: '16px'}} />
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
 
-      {systemInfo && (
-        <div style={{...styles.card, marginBottom: '24px'}}>
-          <div style={styles.cardContent}>
-            <div style={styles.grid4}>
-              <div style={styles.metricCard}>
-                <div style={styles.metricLabel}>Platform</div>
-                <div style={{...styles.metricValue, fontSize: '20px'}}>{systemInfo.platform}</div>
-              </div>
-              <div style={styles.metricCard}>
-                <div style={styles.metricLabel}>CPU Cores</div>
-                <div style={{...styles.metricValue, fontSize: '20px'}}>{systemInfo.cpu_count}</div>
-              </div>
-              <div style={styles.metricCard}>
-                <div style={styles.metricLabel}>Total RAM</div>
-                <div style={{...styles.metricValue, fontSize: '20px'}}>
-                  {Math.round(systemInfo.memory_total / 1024 / 1024 / 1024)}GB
-                </div>
-              </div>
-              <div style={styles.metricCard}>
-                <div style={styles.metricLabel}>Hostname</div>
-                <div style={{...styles.metricValue, fontSize: '20px'}}>{systemInfo.hostname}</div>
-              </div>
+          <div className="toolbar-block toolbar-block-summary">
+            <div className="summary-card">
+              <span className="summary-label">Host</span>
+              <span className="summary-value">{systemInfo?.hostname || 'Loading...'}</span>
+            </div>
+            <div className="summary-card">
+              <span className="summary-label">Platform</span>
+              <span className="summary-value">{systemInfo?.platform || '...'}</span>
+            </div>
+            <div className="summary-card">
+              <span className="summary-label">Memory</span>
+              <span className="summary-value">
+                {systemInfo ? `${Math.round(systemInfo.memory_total / 1024 / 1024 / 1024)}GB` : '...'}
+              </span>
             </div>
           </div>
         </div>
-      )}
 
-      <div style={activePanel === 'overview' ? styles.grid2 : {}}>
-        {activePanel === 'overview' && (
-          <>
-            <SystemMonitor />
-            <PortControl controlPassword={controlPassword} />
-          </>
-        )}
-        {activePanel === 'ports' && <PortControl controlPassword={controlPassword} />}
-        {activePanel === 'process-manager' && <ProcessManager controlPassword={controlPassword} />}
-        {activePanel === 'commands' && <WindowTerminal controlPassword={controlPassword} />}
-        {activePanel === 'network' && <NetworkHub />}
-      </div>
+        <nav className="nav-pills compact-pills">
+          {PANELS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              className={`nav-pill ${activePanel === id ? 'active' : ''}`}
+              onClick={() => setActivePanel(id)}
+            >
+              <Icon size={16} />
+              {label}
+            </button>
+          ))}
+        </nav>
+      </section>
+
+      {renderContent()}
     </div>
   );
 }

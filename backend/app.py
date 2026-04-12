@@ -622,5 +622,27 @@ def is_admin():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/auth/validate", methods=["POST"])
+def validate_control_password():
+    """Validate the provided control password without performing any action."""
+    try:
+        configured_password = get_configured_password()
+        if not configured_password:
+            return jsonify({
+                "valid": False,
+                "configured": False,
+                "error": "Control password is not configured on the server"
+            }), 503
+
+        data = request.get_json(silent=True) or {}
+        provided_password = data.get("password", "")
+
+        return jsonify({
+            "valid": verify_control_password(provided_password),
+            "configured": True
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=False)
