@@ -60,7 +60,7 @@ const ProcessManager = ({ controlPassword, processes, loading, isAdmin, onRefres
           </span>
           <div>
             <h2 className="panel-title">Process Manager</h2>
-            <p className="panel-subtitle">Top CPU consumers with controlled termination for dashboard-owned processes.</p>
+            <p className="panel-subtitle">Top CPU consumers with CPU normalized to total system capacity.</p>
           </div>
         </div>
 
@@ -126,7 +126,7 @@ const ProcessManager = ({ controlPassword, processes, loading, isAdmin, onRefres
               </table>
             </div>
 
-            <div className="muted-note">Showing top 15 processes by CPU usage. Updated from the live event stream.</div>
+            <div className="muted-note">Showing top 15 processes by CPU share across all cores. Updated from the live event stream.</div>
           </>
         )}
       </div>

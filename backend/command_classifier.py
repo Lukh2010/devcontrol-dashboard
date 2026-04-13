@@ -64,12 +64,19 @@ class CommandClassifier:
         # Safe commands (whitelist)
         self.safe_patterns = [
             r'ls\s*',                   # List files
+            r'dir(\s|$)',               # Windows directory listing
             r'pwd\s*',                  # Print working directory
             r'cd\s+',                   # Change directory
             r'cat\s+',                  # View files
+            r'type\s+',                 # Windows file output
             r'grep\s+',                 # Search in files
             r'find\s+',                 # Find files
+            r'where\s+',                # Windows executable lookup
             r'ps\s+',                   # Process list
+            r'tasklist(\s|$)',          # Windows process list
+            r'netstat(\s|$)',           # Network status
+            r'ipconfig(\s|$)',          # Network config
+            r'systeminfo(\s|$)',        # Windows system info
             r'kill\s+',                 # Kill processes
             r'git\s+',                  # Git commands
             r'npm\s+',                  # NPM commands
@@ -79,8 +86,14 @@ class CommandClassifier:
             r'mkdir\s+',                # Make directory
             r'touch\s+',                # Create files
             r'cp\s+',                   # Copy files
+            r'copy\s+',                 # Windows copy
             r'mv\s+',                   # Move files
+            r'move\s+',                 # Windows move
+            r'ren\s+',                  # Windows rename
+            r'rename\s+',               # Windows rename
             r'echo\s+',                 # Echo command
+            r'cls\s*',                  # Clear console
+            r'set(\s|$)',               # Windows environment
             r'export\s+',               # Export variables
             r'env\s*',                  # Environment
             r'whoami\s*',               # Current user

@@ -27,6 +27,7 @@ terminal_manager = TerminalSessionManager()
 # Global CPU measurement cache
 cpu_cache = {}
 last_cpu_update = 0
+process_cpu_times = {}
 
 PROTECTED_ENDPOINTS_MESSAGE = "Protected action requires the launcher control password"
 PID_FILE = Path.home() / '.devcontrol_pids.json'
@@ -97,7 +98,7 @@ def is_dashboard_pid(pid: int) -> bool:
 
 def update_cpu_cache():
     """Update global CPU measurement cache"""
-    global cpu_cache, last_cpu_update
+    global cpu_cache, last_cpu_update, process_cpu_times
     import time
     
     current_time = time.time()
@@ -105,19 +106,30 @@ def update_cpu_cache():
         return
     
     try:
-        # Initialize CPU measurement
-        psutil.cpu_percent(interval=0.1)
-        
-        # Get CPU for all processes
+        cpu_count = max(psutil.cpu_count() or 1, 1)
         new_cache = {}
+        new_cpu_times = {}
+        elapsed = current_time - last_cpu_update if last_cpu_update else 0
+
         for proc in psutil.process_iter(['pid']):
             try:
-                cpu_percent = proc.cpu_percent()
-                new_cache[proc.pid] = cpu_percent
+                cpu_times = proc.cpu_times()
+                total_cpu_time = float(cpu_times.user + cpu_times.system)
+                new_cpu_times[proc.pid] = total_cpu_time
+
+                previous_cpu_time = process_cpu_times.get(proc.pid)
+                if previous_cpu_time is None or elapsed <= 0:
+                    new_cache[proc.pid] = 0.0
+                    continue
+
+                cpu_delta = max(total_cpu_time - previous_cpu_time, 0.0)
+                normalized_cpu = min(max((cpu_delta / elapsed) / cpu_count * 100, 0.0), 100.0)
+                new_cache[proc.pid] = normalized_cpu
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 new_cache[proc.pid] = 0
         
         cpu_cache = new_cache
+        process_cpu_times = new_cpu_times
         last_cpu_update = current_time
     except Exception as e:
         print(f"Error updating CPU cache: {e}")
