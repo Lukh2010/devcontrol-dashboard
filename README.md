@@ -10,6 +10,22 @@ Modern local dashboard for system monitoring, process control, port control, net
 
 ## Quick Start
 
+Install dependencies once before the first manual run:
+
+Backend:
+
+```bash
+cd backend
+python -m pip install -r requirements.txt
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm install
+```
+
 ### Windows
 
 Run the Windows launcher as Administrator:
@@ -23,6 +39,7 @@ Behavior:
 - Starts backend on `http://127.0.0.1:8000`
 - Starts frontend on `http://127.0.0.1:3000`
 - Starts terminal WebSocket on `ws://127.0.0.1:8003`
+- Installs backend and frontend dependencies if they are missing
 - Prompts for a control password if `DEVCONTROL_PASSWORD` is not already set
 
 You must enter the same control password in the frontend to unlock:
@@ -42,26 +59,15 @@ chmod +x tools/start_linux.sh
 ```
 
 The Linux launcher now prompts for a control password and exports it as `DEVCONTROL_PASSWORD` before starting the backend.
+It also installs backend and frontend dependencies if they are missing.
 
 ### Manual Start
 
-Backend:
+Set the control password before starting the backend:
 
-```bash
-cd backend
-python app.py
-```
+Windows Command Prompt:
 
-Frontend:
-
-```bash
-cd frontend
-npm run dev -- --host 127.0.0.1
-```
-
-If you start the backend manually, set a password first:
-
-```bash
+```bat
 set DEVCONTROL_PASSWORD=your-password
 ```
 
@@ -75,6 +81,20 @@ Bash:
 
 ```bash
 export DEVCONTROL_PASSWORD="your-password"
+```
+
+Backend:
+
+```bash
+cd backend
+python app.py
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm run dev -- --host 127.0.0.1
 ```
 
 ## Security Model
@@ -101,6 +121,8 @@ Current limitations:
 - Windows command execution still uses `shell=True` for compatibility
 - there is no user/session system, only a shared control password
 - there are no rate limits
+- the terminal keeps session working-directory state, but it is still not a full PTY-backed interactive shell
+- terminal resize is not supported in the current subprocess execution mode
 
 Use this project only on a trusted local network. Do not expose it to the public internet.
 
@@ -160,6 +182,7 @@ Run the dashboard as Administrator.
 
 - Frontend dev server: Vite
 - Backend API: Flask
+- Live dashboard updates: Server-Sent Events at `/api/events/stream`
 - System/process metrics: psutil
 - Terminal transport: websockets
 

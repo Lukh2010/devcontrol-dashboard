@@ -6,14 +6,13 @@ Manages WebSocket terminal sessions with PTY support and real-time streaming
 import asyncio
 import json
 import uuid
-import subprocess
-import threading
 import time
 import os
 import signal
 import platform
+import shlex
 from typing import Dict, Optional, Any
-from websockets.server import WebSocketServerProtocol
+from websockets.legacy.server import WebSocketServerProtocol
 from command_classifier import CommandClassifier
 
 # PTY support - Windows compatible
@@ -44,6 +43,8 @@ class TerminalSession:
         self.command_history = []
         self.current_command = ""
         self.sudo_pending = False
+        self.pending_classification = ""
+        self.command_lock = asyncio.Lock()
         self.start_time = time.time()
         
     async def start_session(self):
@@ -74,6 +75,10 @@ class TerminalSession:
     async def execute_command(self, command: str):
         """Execute command with safety checks"""
         try:
+            command = (command or "").strip()
+            if not command:
+                return
+
             # Classify command
             classification, reason = self.classifier.classify_command(command)
             
@@ -83,23 +88,36 @@ class TerminalSession:
                 'classification': classification,
                 'timestamp': time.time()
             })
+
+            if classification == 'interactive':
+                await self.send_message({
+                    'type': 'warning',
+                    'message': 'Interactive terminal programs are not supported in the current subprocess mode'
+                })
+                return
             
             # Check if dangerous command needs sudo confirmation
             if self.classifier.needs_sudo(command):
                 self.current_command = command
                 self.sudo_pending = True
+                self.pending_classification = classification
                 
                 await self.send_message({
                     'type': 'sudo_required',
                     'command': command,
                     'reason': reason,
-                    'warning': 'This command can be dangerous to your system!',
+                    'warning': (
+                        'This command can be dangerous to your system!'
+                        if classification == 'dangerous'
+                        else 'This command is not in the allowlist and needs confirmation.'
+                    ),
                     'dangerous_examples': self.classifier.get_dangerous_commands()
                 })
                 return
             
             # Execute command
-            await self._execute_command_internal(command, classification)
+            async with self.command_lock:
+                await self._execute_command_internal(command, classification)
             
         except Exception as e:
             await self.send_message({
@@ -117,29 +135,81 @@ class TerminalSession:
         if confirmed:
             await self.send_message({
                 'type': 'sudo_confirmed',
-                'message': 'Executing dangerous command...'
+                'message': 'Executing confirmed command...'
             })
-            await self._execute_command_internal(self.current_command, 'dangerous')
+            async with self.command_lock:
+                await self._execute_command_internal(self.current_command, self.pending_classification or 'dangerous')
         else:
             await self.send_message({
                 'type': 'sudo_cancelled',
-                'message': 'Dangerous command cancelled'
+                'message': 'Command cancelled'
             })
         
         self.current_command = ""
+        self.pending_classification = ""
+
+    def _parse_command(self, command: str):
+        if platform.system() == 'Windows':
+            return shlex.split(command, posix=False)
+        return shlex.split(command)
+
+    def _resolve_directory(self, target: str) -> str:
+        if not target or target == "~":
+            return os.path.expanduser("~")
+
+        expanded = os.path.expandvars(os.path.expanduser(target.strip('"').strip("'")))
+        if os.path.isabs(expanded):
+            return os.path.abspath(expanded)
+        return os.path.abspath(os.path.join(self.working_dir, expanded))
+
+    async def _handle_builtin_command(self, command: str) -> bool:
+        try:
+            parts = self._parse_command(command)
+        except ValueError as exc:
+            await self.send_message({
+                'type': 'error',
+                'message': f'Could not parse command: {exc}'
+            })
+            return True
+
+        if not parts:
+            return True
+
+        if parts[0].lower() != 'cd':
+            return False
+
+        target = parts[1] if len(parts) > 1 else "~"
+        resolved_dir = self._resolve_directory(target)
+        if not os.path.isdir(resolved_dir):
+            await self.send_message({
+                'type': 'error',
+                'message': f'Directory not found: {resolved_dir}'
+            })
+            return True
+
+        self.working_dir = resolved_dir
+        await self.send_message({
+            'type': 'cwd_changed',
+            'working_dir': self.working_dir,
+            'message': f'Working directory changed to {self.working_dir}'
+        })
+        return True
     
     async def _execute_command_internal(self, command: str, classification: str):
         """Internal command execution"""
         try:
             print(f"Executing command: {command}")
             
-            # Execute command directly and get output
-            import subprocess
-            import shlex
-            
-            # Split command safely to avoid shell injection
+            await self.send_message({
+                'type': 'command_sent',
+                'command': command,
+                'classification': classification
+            })
+
+            if await self._handle_builtin_command(command):
+                return
+
             if platform.system() == 'Windows':
-                # On Windows, use shell=True for built-in commands but validate input
                 if any(cmd in command.lower() for cmd in ['del', 'rmdir', 'format', 'shutdown']):
                     await self.send_message({
                         'type': 'error',
@@ -172,67 +242,62 @@ class TerminalSession:
                             'type': 'warning',
                             'message': '⚠️ Could not verify admin privileges, trying command anyway...'
                         })
-                
-                result = subprocess.run(
+                process = await asyncio.create_subprocess_shell(
                     command,
-                    shell=True,
                     cwd=self.working_dir,
-                    capture_output=True,
-                    text=True,
-                    timeout=30
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
                 )
             else:
-                # On Unix-like systems, avoid shell=True
                 try:
-                    args = shlex.split(command)
-                    result = subprocess.run(
-                        args,
+                    args = self._parse_command(command)
+                    process = await asyncio.create_subprocess_exec(
+                        *args,
                         cwd=self.working_dir,
-                        capture_output=True,
-                        text=True,
-                        timeout=30
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
                     )
                 except ValueError:
-                    # Fallback for complex commands
-                    result = subprocess.run(
+                    process = await asyncio.create_subprocess_shell(
                         command,
-                        shell=True,
                         cwd=self.working_dir,
-                        capture_output=True,
-                        text=True,
-                        timeout=30
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
                     )
-            
-            # Send command confirmation
-            await self.send_message({
-                'type': 'command_sent',
-                'command': command,
-                'classification': classification
-            })
-            
-            # Send output
-            if result.stdout:
+
+            self.process = process
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+            except asyncio.TimeoutError:
+                process.terminate()
+                await process.wait()
+                self.process = None
+                await self.send_message({
+                    'type': 'error',
+                    'message': 'Command execution timed out'
+                })
+                return
+            finally:
+                self.process = None
+
+            stdout_text = stdout.decode(errors='replace') if stdout else ''
+            stderr_text = stderr.decode(errors='replace') if stderr else ''
+
+            if stdout_text:
                 await self.send_message({
                     'type': 'output',
-                    'data': result.stdout,
+                    'data': stdout_text,
                     'timestamp': time.time()
                 })
             
-            # Send error output if any
-            if result.stderr:
+            if stderr_text:
                 await self.send_message({
                     'type': 'output',
-                    'data': f"ERROR: {result.stderr}",
+                    'data': f"ERROR: {stderr_text}",
                     'timestamp': time.time()
                 })
             
-            print(f"Command executed: {command}, Return code: {result.returncode}")
-                
-        except subprocess.TimeoutExpired:
-            await self.send_message({
-                'type': 'error',
-                'message': 'Command execution timed out'
-            })
+            print(f"Command executed: {command}, Return code: {process.returncode}")
         except Exception as e:
             print(f"Error executing command: {e}")
             await self.send_message({
@@ -243,19 +308,22 @@ class TerminalSession:
     async def interrupt_command(self):
         """Send interrupt signal (Ctrl+C)"""
         try:
-            if self.process:
-                if PTY_AVAILABLE and hasattr(self.process, 'isalive') and self.process.isalive():
-                    # PTY process
-                    self.process.write('\x03')  # Ctrl+C
-                else:
-                    # Subprocess
-                    self.process.stdin.write('\x03')  # Ctrl+C
-                    self.process.stdin.flush()
-                
+            if not self.process or self.process.returncode is not None:
                 await self.send_message({
-                    'type': 'interrupt_sent',
-                    'message': 'Command interrupted'
+                    'type': 'warning',
+                    'message': 'No running command to interrupt'
                 })
+                return
+
+            if platform.system() == 'Windows':
+                self.process.terminate()
+            else:
+                self.process.send_signal(signal.SIGINT)
+
+            await self.send_message({
+                'type': 'interrupt_sent',
+                'message': 'Interrupt signal sent to the running command'
+            })
         except Exception as e:
             await self.send_message({
                 'type': 'error',
@@ -276,27 +344,12 @@ class TerminalSession:
     
     async def resize_terminal(self, cols: int, rows: int):
         """Resize terminal"""
-        try:
-            if self.process:
-                if PTY_AVAILABLE and hasattr(self.process, 'isalive') and self.process.isalive():
-                    # PTY process
-                    self.process.setwinsize(rows, cols)
-                    await self.send_message({
-                        'type': 'resize_complete',
-                        'cols': cols,
-                        'rows': rows
-                    })
-                else:
-                    # Subprocess - resize not supported
-                    await self.send_message({
-                        'type': 'error',
-                        'message': 'Terminal resize not supported with subprocess fallback'
-                    })
-        except Exception as e:
-            await self.send_message({
-                'type': 'error',
-                'message': f'Failed to resize terminal: {str(e)}'
-            })
+        await self.send_message({
+            'type': 'warning',
+            'message': 'Terminal resize is not supported in the current subprocess mode',
+            'cols': cols,
+            'rows': rows
+        })
     
     async def close_session(self):
         """Close terminal session"""
@@ -304,21 +357,13 @@ class TerminalSession:
         
         if self.process:
             try:
-                if PTY_AVAILABLE and hasattr(self.process, 'isalive') and self.process.isalive():
-                    # PTY process
+                if self.process.returncode is None:
                     self.process.terminate()
-                    self.process.wait()
-                elif hasattr(self.process, 'poll') and self.process.poll() is None:
-                    # Subprocess
-                    self.process.terminate()
-                    self.process.wait(timeout=5)
-            except:
+                    await asyncio.wait_for(self.process.wait(), timeout=5)
+            except Exception:
                 try:
-                    if PTY_AVAILABLE and hasattr(self.process, 'kill'):
-                        self.process.kill()
-                    else:
-                        self.process.kill()
-                except:
+                    self.process.kill()
+                except Exception:
                     pass
         
         await self.send_message({

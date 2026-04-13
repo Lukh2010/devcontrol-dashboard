@@ -10,6 +10,7 @@ import subprocess
 import time
 import signal
 import platform
+import json
 from pathlib import Path
 
 starter = None
@@ -21,6 +22,28 @@ class DevControlStarter:
         self.project_root = Path(__file__).parent
         self.backend_dir = self.project_root / "backend"
         self.frontend_dir = self.project_root / "frontend"
+        self.pid_file = Path.home() / '.devcontrol_pids.json'
+
+    def load_registered_pids(self):
+        try:
+            if self.pid_file.exists():
+                with open(self.pid_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return {}
+
+    def save_registered_pids(self, pid_map):
+        with open(self.pid_file, 'w', encoding='utf-8') as f:
+            json.dump(pid_map, f, indent=2)
+
+    def register_pid(self, group, pid):
+        pid_map = self.load_registered_pids()
+        group_pids = pid_map.setdefault(group, [])
+        pid_str = str(pid)
+        if pid_str not in group_pids:
+            group_pids.append(pid_str)
+            self.save_registered_pids(pid_map)
         
     def check_dependencies(self):
         """Check if required dependencies are available"""
@@ -71,8 +94,7 @@ class DevControlStarter:
         
         try:
             subprocess.run([
-                sys.executable, '-m', 'pip', 'install', 
-                'flask', 'flask-cors', 'psutil', 'python-multipart'
+                sys.executable, '-m', 'pip', 'install', '-r', str(requirements_file)
             ], check=True, cwd=self.backend_dir)
             print("[OK] Backend dependencies installed")
             return True
@@ -91,6 +113,7 @@ class DevControlStarter:
         
         node_modules = self.frontend_dir / "node_modules"
         npm_cmd = 'npm.cmd' if platform.system() == 'Windows' else 'npm'
+        package_lock = self.frontend_dir / "package-lock.json"
         if not node_modules.exists():
             try:
                 subprocess.run([npm_cmd, 'install'], check=True, cwd=self.frontend_dir)
@@ -99,7 +122,13 @@ class DevControlStarter:
                 print(f"[ERROR] Failed to install frontend dependencies: {e}")
                 return False
         else:
-            print("[OK] Frontend dependencies already installed")
+            install_cmd = [npm_cmd, 'ci'] if package_lock.exists() else [npm_cmd, 'install']
+            try:
+                subprocess.run([npm_cmd, 'ls', '--depth=0'], check=True, cwd=self.frontend_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                print("[OK] Frontend dependencies already installed")
+            except subprocess.CalledProcessError:
+                subprocess.run(install_cmd, check=True, cwd=self.frontend_dir)
+                print("[OK] Frontend dependencies repaired")
         
         return True
     
@@ -126,6 +155,8 @@ class DevControlStarter:
             )
             time.sleep(2)
             if self.backend_process.poll() is None:
+                self.register_pid('backend', self.backend_process.pid)
+                self.register_pid('websocket', self.backend_process.pid)
                 print("[OK] Backend server started on http://localhost:8000")
                 print("[OK] WebSocket terminal server started on ws://localhost:8003")
                 return True
@@ -150,6 +181,7 @@ class DevControlStarter:
             # Wait a moment and check if it started successfully
             time.sleep(3)
             if self.frontend_process.poll() is None:
+                self.register_pid('frontend', self.frontend_process.pid)
                 print("[OK] Frontend server started on http://localhost:3000")
                 return True
             else:
@@ -234,20 +266,12 @@ class DevControlStarter:
     
     def kill_dashboard_processes(self):
         """Kill all registered dashboard processes from PID file"""
-        import json
-        import os
-        import signal
-        import time
-        from pathlib import Path
-        
-        pid_file = Path.home() / '.devcontrol_pids.json'
-        
-        if not pid_file.exists():
+        if not self.pid_file.exists():
             print("No PID file found - no registered processes to kill")
             return
         
         try:
-            with open(pid_file, 'r') as f:
+            with open(self.pid_file, 'r', encoding='utf-8') as f:
                 pids = json.load(f)
             
             print("Terminating registered dashboard processes...")
@@ -256,33 +280,39 @@ class DevControlStarter:
                 for pid_str in pid_list:
                     try:
                         pid = int(pid_str)
-                        
-                        # Try SIGTERM first
-                        os.kill(pid, signal.SIGTERM)
-                        print(f"Sent SIGTERM to PID {pid} ({group_name})")
-                        
-                        # Wait up to 5 seconds
-                        start_time = time.time()
-                        while time.time() - start_time < 5:
-                            try:
-                                # Check if process still exists
-                                os.kill(pid, 0)
-                                time.sleep(0.1)
-                            except ProcessLookupError:
-                                print(f"PID {pid} terminated successfully")
-                                break
+                        if platform.system() == 'Windows':
+                            result = subprocess.run(
+                                ['taskkill', '/T', '/F', '/PID', str(pid)],
+                                capture_output=True,
+                                text=True
+                            )
+                            if result.returncode == 0:
+                                print(f"Terminated PID {pid} ({group_name})")
+                            else:
+                                print(f"PID {pid} was not terminated cleanly: {result.stderr.strip() or result.stdout.strip()}")
                         else:
-                            # Force kill if still running
-                            os.kill(pid, signal.SIGKILL)
-                            print(f"Force killed PID {pid} with SIGKILL")
-                            
+                            os.kill(pid, signal.SIGTERM)
+                            print(f"Sent SIGTERM to PID {pid} ({group_name})")
+
+                            start_time = time.time()
+                            while time.time() - start_time < 5:
+                                try:
+                                    os.kill(pid, 0)
+                                    time.sleep(0.1)
+                                except ProcessLookupError:
+                                    print(f"PID {pid} terminated successfully")
+                                    break
+                            else:
+                                os.kill(pid, signal.SIGKILL)
+                                print(f"Force killed PID {pid} with SIGKILL")
+
                     except ProcessLookupError:
-                        print(f"PID {pid} already terminated")
+                        print(f"PID {pid_str} already terminated")
                     except Exception as e:
-                        print(f"Error killing PID {pid}: {e}")
+                        print(f"Error killing PID {pid_str}: {e}")
             
             # Remove PID file
-            pid_file.unlink()
+            self.pid_file.unlink()
             print("PID file cleaned up")
             
         except Exception as e:

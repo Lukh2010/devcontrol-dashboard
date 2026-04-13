@@ -26,9 +26,14 @@ const WindowTerminal = ({ controlPassword }) => {
 
     const connectWebSocket = () => {
       try {
-        const websocket = new WebSocket(`ws://${window.location.hostname}:8003?password=${encodeURIComponent(controlPassword)}`);
+        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const websocket = new WebSocket(`${protocol}://${window.location.hostname}:8003?password=${encodeURIComponent(controlPassword)}`);
 
         websocket.onopen = () => {
+          if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+            reconnectTimeoutRef.current = null;
+          }
           setConnected(true);
           wsRef.current = websocket;
           addOutput({ type: 'system', text: 'Connected to terminal server' });
@@ -84,6 +89,10 @@ const WindowTerminal = ({ controlPassword }) => {
         setWorkingDir(message.working_dir);
         addOutput({ type: 'system', text: message.message });
         break;
+      case 'cwd_changed':
+        setWorkingDir(message.working_dir);
+        addOutput({ type: 'system', text: message.message });
+        break;
       case 'output':
         addOutput({ type: 'output', text: message.data });
         break;
@@ -98,6 +107,8 @@ const WindowTerminal = ({ controlPassword }) => {
           dangerous_examples: message.dangerous_examples
         });
         break;
+      case 'info':
+      case 'warning':
       case 'sudo_confirmed':
       case 'sudo_cancelled':
         addOutput({ type: 'warning', text: message.message });

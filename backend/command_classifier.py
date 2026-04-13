@@ -123,13 +123,13 @@ class CommandClassifier:
             if re.search(pattern, command_lower, re.IGNORECASE):
                 return 'safe', f"Safe command: {pattern}"
         
-        # Default to safe for unknown commands
-        return 'unknown', "Unknown command - treating as safe"
+        # Unknown commands require explicit confirmation.
+        return 'unknown', "Unknown command - not matched by the allowlist"
     
     def needs_sudo(self, command: str) -> bool:
         """Check if command needs sudo confirmation"""
         classification, _ = self.classify_command(command)
-        return classification == 'dangerous'
+        return classification in ('dangerous', 'unknown')
     
     def is_interactive(self, command: str) -> bool:
         """Check if command needs PTY for interactive mode"""

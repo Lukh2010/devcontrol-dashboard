@@ -173,6 +173,8 @@ fix_*.ps1
 *.md
 !README.md
 !LICENSE
+!docs/
+!docs/*.md
 
 # HTML files
 *.html

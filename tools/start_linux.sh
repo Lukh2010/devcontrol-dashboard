@@ -67,8 +67,20 @@ else
     echo "Verwende DEVCONTROL_PASSWORD aus der Umgebung."
 fi
 
-echo "Starte Backend..."
+echo "Installiere Backend-Abhaengigkeiten..."
 cd backend
+python3 -m pip install -r requirements.txt || exit 1
+
+echo "Installiere Frontend-Abhaengigkeiten falls noetig..."
+cd ../frontend
+if [ ! -d node_modules ]; then
+    npm install || exit 1
+else
+    npm ls --depth=0 >/dev/null 2>&1 || npm install || exit 1
+fi
+
+echo "Starte Backend..."
+cd ../backend
 python3 app.py &
 BACKEND_PID=$!
 echo "Backend PID: $BACKEND_PID"
@@ -84,7 +96,8 @@ python3 -c "
 import json
 pids = {
     'backend': ['$BACKEND_PID'],
-    'frontend': ['$FRONTEND_PID']
+    'frontend': ['$FRONTEND_PID'],
+    'websocket': ['$BACKEND_PID']
 }
 with open('$PID_FILE', 'w') as f:
     json.dump(pids, f, indent=2)

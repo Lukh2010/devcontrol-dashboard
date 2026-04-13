@@ -6,7 +6,8 @@ import subprocess
 import platform
 import time
 import asyncio
-import websockets
+from websockets import exceptions as websocket_exceptions
+from websockets.legacy.server import serve as websocket_serve
 import json
 import threading
 import os
@@ -28,6 +29,9 @@ cpu_cache = {}
 last_cpu_update = 0
 
 PROTECTED_ENDPOINTS_MESSAGE = "Protected action requires the launcher control password"
+PID_FILE = Path.home() / '.devcontrol_pids.json'
+websocket_thread = None
+websocket_thread_lock = threading.Lock()
 
 def get_configured_password():
     """Return the configured control password."""
@@ -56,15 +60,34 @@ def require_control_password():
 
 def load_dashboard_pids():
     """Load dashboard-managed PIDs from the shared PID file."""
-    pid_file = Path.home() / '.devcontrol_pids.json'
-    if not pid_file.exists():
+    if not PID_FILE.exists():
         return {}
 
     try:
-        with open(pid_file, 'r') as f:
+        with open(PID_FILE, 'r') as f:
             return json.load(f)
     except Exception:
         return {}
+
+def save_dashboard_pids(pids):
+    """Persist dashboard-managed PIDs to the shared PID file."""
+    try:
+        with open(PID_FILE, 'w') as f:
+            json.dump(pids, f, indent=2)
+    except Exception as exc:
+        print(f"Warning: could not write PID file {PID_FILE}: {exc}")
+
+def register_dashboard_pid(group: str, pid: int):
+    """Register a dashboard PID in the shared PID file."""
+    try:
+        dashboard_pids = load_dashboard_pids()
+        group_pids = dashboard_pids.setdefault(group, [])
+        pid_str = str(pid)
+        if pid_str not in group_pids:
+            group_pids.append(pid_str)
+            save_dashboard_pids(dashboard_pids)
+    except Exception as exc:
+        print(f"Warning: could not register PID {pid} for {group}: {exc}")
 
 def is_dashboard_pid(pid: int) -> bool:
     """Check whether a PID is owned by this dashboard."""
@@ -161,22 +184,23 @@ def collect_processes():
 
 
 def collect_ports():
-    connections = []
+    connections = {}
     for conn in psutil.net_connections():
         if conn.status == 'LISTEN':
             try:
                 process = psutil.Process(conn.pid) if conn.pid else None
                 if process:
-                    connections.append({
+                    key = (conn.laddr.port, conn.pid, process.name())
+                    connections[key] = {
                         "port": conn.laddr.port,
                         "process_name": process.name(),
                         "pid": conn.pid,
                         "status": conn.status
-                    })
+                    }
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
-    connections.sort(key=lambda x: x['port'])
-    return connections
+    deduped_connections = sorted(connections.values(), key=lambda x: (x['port'], x['pid']))
+    return deduped_connections
 
 
 def collect_network_info():
@@ -253,6 +277,8 @@ event_publisher = DashboardEventPublisher(
     }
 )
 event_publisher.start()
+register_dashboard_pid("backend", os.getpid())
+register_dashboard_pid("websocket", os.getpid())
 
 # WebSocket server
 async def handle_websocket(websocket, path):
@@ -295,7 +321,7 @@ async def handle_websocket(websocket, path):
                     'message': f'Error handling message: {str(e)}'
                 }))
                 
-    except websockets.exceptions.ConnectionClosed:
+    except websocket_exceptions.ConnectionClosed:
         pass
     except Exception as e:
         print(f"WebSocket error: {e}")
@@ -314,47 +340,40 @@ def start_websocket_server():
     asyncio.set_event_loop(loop)
     
     try:
-        start_server = websockets.serve(handle_websocket, "0.0.0.0", 8003)
+        start_server = websocket_serve(handle_websocket, "0.0.0.0", 8003)
         loop.run_until_complete(start_server)
+        event_publisher.publish("action", {
+            "action": "terminal_server",
+            "status": "ready",
+            "port": 8003
+        })
         print("WebSocket terminal server started on ws://localhost:8003")
         loop.run_forever()
     except OSError as e:
-        if "address already in use" in str(e).lower() or "10048" in str(e):
-            print("WebSocket port 8003 already in use, continuing without WebSocket terminal...")
+        message = str(e)
+        event_publisher.publish("action", {
+            "action": "terminal_server",
+            "status": "unavailable",
+            "port": 8003,
+            "reason": message
+        })
+        if "address already in use" in message.lower() or "10048" in message:
+            print(f"WebSocket port 8003 is unavailable: {message}")
         else:
             raise e
 
-# Start WebSocket server in background thread only if not already running
-import threading
-import time
-
-def start_websocket_if_not_running():
-    """Start WebSocket server only if not already running"""
-    # Check if port 8003 is already in use by our own process
-    try:
-        import socket
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        result = sock.connect_ex(('localhost', 8003))
-        sock.close()
-        
-        if result == 0:
-            # Port is already in use, don't start another WebSocket server
-            print("WebSocket server already running, skipping...")
+def start_websocket_server_thread():
+    """Start the terminal WebSocket thread once for this backend process."""
+    global websocket_thread
+    with websocket_thread_lock:
+        if websocket_thread and websocket_thread.is_alive():
             return
-        
-        # Port is free, start WebSocket server
         websocket_thread = threading.Thread(target=start_websocket_server, daemon=True)
         websocket_thread.start()
         print("WebSocket server thread started")
-        
-    except Exception as e:
-        print(f"Error checking WebSocket port: {e}")
-        # Try to start anyway
-        websocket_thread = threading.Thread(target=start_websocket_server, daemon=True)
-        websocket_thread.start()
 
 # Start WebSocket server with delay to avoid conflicts
-timer = threading.Timer(2.0, start_websocket_if_not_running)
+timer = threading.Timer(2.0, start_websocket_server_thread)
 timer.start()
 
 @app.route("/")
@@ -483,9 +502,13 @@ def run_command():
         if auth_error:
             return auth_error
 
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         command = data.get('command', '')
         name = data.get('name', '')
+        if not isinstance(command, str) or not command.strip():
+            return jsonify({"error": "Request JSON must include a non-empty string 'command'"}), 400
+        if name and not isinstance(name, str):
+            return jsonify({"error": "Optional field 'name' must be a string"}), 400
         
         # Security: Prevent dangerous commands
         dangerous_commands = ['rm -rf', 'format', 'del /f', 'shutdown', 'reboot']
