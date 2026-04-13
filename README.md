@@ -1,22 +1,83 @@
 # DevControl Dashboard
 
-Modern local dashboard for system monitoring, process control, port control, network inspection, and password-protected terminal access.
+DevControl Dashboard is a local machine control panel with a React frontend and a Python backend. It combines live telemetry, process and port controls, network inspection, and a WebSocket-backed terminal behind an optional control password.
+
+It is designed for local or trusted-network use, not public exposure.
+
+## What It Does
+
+- live system performance monitoring
+- process inspection and dashboard-owned process termination
+- listening-port inspection and dashboard-owned port termination
+- network interface and gateway overview
+- browser terminal with command safety checks
+- optional password protection for sensitive actions
+- SSE-driven live updates from the backend
+
+## Current Stack
+
+### Frontend
+
+- React 18
+- Vite
+- Tailwind CSS
+- TanStack Query
+- Zod
+- Motion
+- Vitest
+- Playwright
+- MSW
+
+### Backend
+
+- Flask
+- psutil
+- websockets
+- Python 3.10+
 
 ## Requirements
 
-- Python 3.10+
-- Node.js 16+
+- Python 3.10 or newer
+- Node.js 20 recommended
 - npm
 
 ## Quick Start
 
-Install dependencies once before the first manual run:
+### Windows
+
+Run the launcher as Administrator:
+
+```bat
+tools\start_windows.bat
+```
+
+What it does:
+
+- starts backend on `http://127.0.0.1:8000`
+- starts frontend on `http://127.0.0.1:3000`
+- starts terminal WebSocket on `ws://127.0.0.1:8003`
+- installs missing backend and frontend dependencies
+- asks whether you want password protection enabled
+
+If you enable a password, enter the same password in the dashboard UI to unlock protected actions.
+
+### Linux
+
+```bash
+chmod +x tools/start_linux.sh
+./tools/start_linux.sh
+```
+
+The Linux launcher also asks whether password protection should be enabled before startup.
+
+### Manual Start
 
 Backend:
 
 ```bash
 cd backend
 python -m pip install -r requirements.txt
+python app.py
 ```
 
 Frontend:
@@ -24,54 +85,12 @@ Frontend:
 ```bash
 cd frontend
 npm install
+npm run dev -- --host 127.0.0.1
 ```
 
-### Windows
+Optional password:
 
-Run the Windows launcher as Administrator:
-
-```bat
-tools\start_windows.bat
-```
-
-Behavior:
-
-- Starts backend on `http://127.0.0.1:8000`
-- Starts frontend on `http://127.0.0.1:3000`
-- Starts terminal WebSocket on `ws://127.0.0.1:8003`
-- Installs backend and frontend dependencies if they are missing
-- Prompts for a control password if `DEVCONTROL_PASSWORD` is not already set
-
-You must enter the same control password in the frontend to unlock:
-
-- terminal access
-- custom command execution
-- process termination
-- port termination
-
-### Linux
-
-Run the Linux launcher:
-
-```bash
-chmod +x tools/start_linux.sh
-./tools/start_linux.sh
-```
-
-The Linux launcher now prompts for a control password and exports it as `DEVCONTROL_PASSWORD` before starting the backend.
-It also installs backend and frontend dependencies if they are missing.
-
-### Manual Start
-
-Set the control password before starting the backend:
-
-Windows Command Prompt:
-
-```bat
-set DEVCONTROL_PASSWORD=your-password
-```
-
-PowerShell:
+Windows PowerShell:
 
 ```powershell
 $env:DEVCONTROL_PASSWORD = "your-password"
@@ -83,62 +102,55 @@ Bash:
 export DEVCONTROL_PASSWORD="your-password"
 ```
 
-Backend:
-
-```bash
-cd backend
-python app.py
-```
-
-Frontend:
-
-```bash
-cd frontend
-npm run dev -- --host 127.0.0.1
-```
+If `DEVCONTROL_PASSWORD` is unset, the backend runs without password protection.
 
 ## Security Model
 
-Protected actions require the launcher control password. The frontend sends it to the backend using the `X-DevControl-Password` header, and the terminal WebSocket requires it at connect time.
+Sensitive actions can be protected by the launcher control password.
 
-Protected actions:
+Protected endpoints:
 
-- `/api/commands/run`
-- `/api/port/<port>`
-- `/api/processes/<pid>/kill`
-- WebSocket terminal access on port `8003`
+- `POST /api/commands/run`
+- `DELETE /api/port/<port>`
+- `POST /api/processes/<pid>/kill`
+- terminal WebSocket on port `8003`
 
 Current safeguards:
 
-- password gate for sensitive actions
-- dashboard-owned process restriction for process and port termination
-- dangerous-command filtering in terminal and command execution paths
-- admin check for Windows process termination
+- optional password gate for sensitive actions
+- dashboard-owned PID restriction for process and port termination
+- command classification and dangerous-command filtering
+- admin check for process termination on Windows
 
 Current limitations:
 
-- the backend still binds to `0.0.0.0`
-- Windows command execution still uses `shell=True` for compatibility
-- there is no user/session system, only a shared control password
+- backend binds to `0.0.0.0`
+- Windows command execution still uses `shell=True` in some paths
+- there is no multi-user auth or session model
 - there are no rate limits
-- the terminal keeps session working-directory state, but it is still not a full PTY-backed interactive shell
-- terminal resize is not supported in the current subprocess execution mode
+- terminal mode is subprocess-based, not a full PTY shell
 
-Use this project only on a trusted local network. Do not expose it to the public internet.
+Use this project only on a trusted machine or trusted local network.
 
-## Backend Architecture
+## Architecture
 
-The backend now runs as a service-oriented monolith. It is still one deployable Python process, but the responsibilities are split into internal services with an event-bus boundary between producers and stream consumers.
+The backend is split as a service-oriented monolith. It still runs as one Python deployable, but responsibilities are separated internally.
 
-Services:
+Backend services:
 
-- API service: Flask routes and frontend-facing HTTP contract
-- telemetry collector: periodic host, process, port, and network snapshots
-- terminal gateway: WebSocket terminal authentication and session routing
-- action executor: protected command, process-kill, and port-kill operations
-- stream processor: consumes the internal event bus and fans out SSE events
+- API service
+- telemetry collector
+- action executor
+- terminal gateway
+- stream processor
+- in-memory event bus
 
-This is the first step toward a true distributed backend. The current split makes it easier to later replace the in-memory bus with Redis/NATS/RabbitMQ and move services into separate processes.
+The frontend uses a typed data layer:
+
+- TanStack Query for cached API state and mutations
+- Zod for response and event payload validation
+- SSE for live backend snapshots
+- Motion for animated transitions
 
 ## Project Structure
 
@@ -152,24 +164,115 @@ devcontrol-dashboard/
 |   |-- requirements.txt
 |   |-- security.py
 |   |-- service_runtime.py
-|   |-- services/
-|   |   |-- action_executor.py
-|   |   |-- stream_processor.py
-|   |   |-- telemetry_service.py
-|   |   `-- terminal_gateway.py
-|   `-- terminal_session.py
+|   |-- terminal_session.py
+|   `-- services/
 |-- frontend/
 |   |-- package.json
+|   |-- package-lock.json
+|   |-- playwright.config.js
 |   |-- vite.config.js
-|   `-- src/
+|   |-- public/
+|   |   `-- mockServiceWorker.js
+|   |-- src/
+|   |   |-- app/
+|   |   |-- components/
+|   |   |-- features/
+|   |   |-- mocks/
+|   |   `-- test/
+|   `-- tests/
+|       `-- e2e/
 |-- tools/
 |   |-- cleanup_ports.bat
 |   |-- cleanup_ports.py
 |   |-- cleanup_ports.sh
 |   |-- start_linux.sh
 |   `-- start_windows.bat
+|-- .github/
+|   `-- workflows/
+|       `-- ci.yml
 `-- start.py
 ```
+
+## Frontend Development
+
+### Commands
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Build:
+
+```bash
+npm run build
+```
+
+Unit tests:
+
+```bash
+npm run test
+```
+
+E2E tests:
+
+```bash
+npm run test:e2e
+```
+
+### Mocked Frontend Mode
+
+MSW is configured for optional browser mocking in development.
+
+To run the frontend with mocked API responses instead of the live backend:
+
+```bash
+cd frontend
+VITE_ENABLE_MSW=true npm run dev
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:VITE_ENABLE_MSW = "true"
+npm run dev
+```
+
+## Backend Development
+
+```bash
+cd backend
+python -m pip install -r requirements.txt
+python app.py
+```
+
+Useful API endpoints:
+
+- `GET /api/system/info`
+- `GET /api/system/performance`
+- `GET /api/processes`
+- `GET /api/ports`
+- `GET /api/network/info`
+- `GET /api/auth/status`
+- `POST /api/auth/validate`
+- `GET /api/events/stream`
+
+## CI
+
+The GitHub Actions workflow runs:
+
+- backend syntax checks
+- backend live API smoke tests
+- frontend production build
+- Vitest
+- Playwright
+- dependency review on pull requests
+- Trivy security scanning
+
+Workflow file:
+
+- [.github/workflows/ci.yml](.github/workflows/ci.yml)
 
 ## Troubleshooting
 
@@ -189,25 +292,35 @@ tools\cleanup_ports.bat
 python tools/cleanup_ports.py
 ```
 
-### Frontend fails with `spawn EPERM`
+### Frontend test or build output appears in Git
 
-That is an environment/process-spawn restriction, usually caused by sandboxing or host policy, not by the React code itself. Run the frontend outside the sandbox or from a normal local terminal.
+Generated folders like `frontend/dist`, `frontend/test-results`, and Playwright reports should stay ignored. Only commit source files, configs, and the lockfile.
 
 ### Protected actions return `401`
 
-The frontend password does not match the backend `DEVCONTROL_PASSWORD`. Re-enter the same password used during launch.
+The frontend password does not match the backend `DEVCONTROL_PASSWORD`.
 
 ### Process controls do not work on Windows
 
 Run the dashboard as Administrator.
 
-## Development Notes
+### Terminal stays disconnected
 
-- Frontend dev server: Vite
-- Backend API: Flask
-- Live dashboard updates: Server-Sent Events at `/api/events/stream`
-- System/process metrics: psutil
-- Terminal transport: websockets
+Check:
+
+- backend is running
+- port `8003` is free
+- the password matches if protection is enabled
+
+## Roadmap Direction
+
+The current backend split is a foundation for future expansion into:
+
+- multi-process services
+- external queues or buses
+- remote agents
+- stronger auth and audit trails
+- historical telemetry storage
 
 ## License
 
