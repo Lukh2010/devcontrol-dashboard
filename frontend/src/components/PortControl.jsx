@@ -16,10 +16,10 @@ const PortControl = ({ controlPassword, ports, loading, onRefresh }) => {
       const result = await response.json();
       setMessage(response.ok ? `Success: ${result.message}` : `Error: ${result.error || 'Unknown error'}`);
       setTimeout(() => setMessage(''), 3000);
-
       if (response.ok) {
-        await onRefresh();
+        onRefresh?.();
       }
+
     } catch (error) {
       setMessage(`Network error: ${error.message}`);
       setTimeout(() => setMessage(''), 3000);

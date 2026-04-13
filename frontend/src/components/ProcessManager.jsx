@@ -27,12 +27,10 @@ const ProcessManager = ({ controlPassword, processes, loading, isAdmin, onRefres
       if (!response.ok) {
         throw new Error(result.error || 'Failed to kill process');
       }
-
       setTimeout(() => {
-        onRefresh().catch((refreshError) => {
-          setError(refreshError.message);
-        });
-      }, 1000);
+        onRefresh?.().catch((refreshError) => setError(refreshError.message));
+      }, 600);
+
     } catch (err) {
       setError(err.message);
     } finally {
@@ -66,12 +64,7 @@ const ProcessManager = ({ controlPassword, processes, loading, isAdmin, onRefres
           </div>
         </div>
 
-        <button className="ghost-button" onClick={() => {
-          setError(null);
-          onRefresh().catch((refreshError) => {
-            setError(refreshError.message);
-          });
-        }} disabled={loading}>
+        <button className="ghost-button" onClick={() => onRefresh?.()} disabled={loading}>
           <RefreshCw size={16} />
           Refresh
         </button>
@@ -133,7 +126,7 @@ const ProcessManager = ({ controlPassword, processes, loading, isAdmin, onRefres
               </table>
             </div>
 
-            <div className="muted-note">Showing top 15 processes by CPU usage. Auto-refresh interval: 5 seconds.</div>
+            <div className="muted-note">Showing top 15 processes by CPU usage. Updated from the live event stream.</div>
           </>
         )}
       </div>
