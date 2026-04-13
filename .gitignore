@@ -128,6 +128,8 @@ temp/
 # Build outputs
 dist/
 build/
+frontend/dist/
+frontend/.vite/
 
 # Database
 *.db
@@ -135,7 +137,6 @@ build/
 *.sqlite3
 
 # Package managers
-package-lock.json
 yarn.lock
 
 # Python specific
@@ -152,6 +153,12 @@ instance/
 .tox/
 htmlcov/
 backend/tests/test_api_contract.py
+frontend/test-results/
+frontend/tests/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/.playwright/
+frontend/.vitest/
 
 # Documentation
 docs/_build/
@@ -191,11 +198,11 @@ __pycache__/
 # Frontend junk files
 styles.css
 fix_jsx.ps1
-App_*.jsx
-!App.jsx
 *_Apple.jsx
 *_working.jsx
 AllComponents_*.jsx
 LiveTerminal.jsx
 
 .windsurfrules
+frontend/src/test/unit/App.test.jsx
+frontend/src/test/unit/schemas.test.jsx

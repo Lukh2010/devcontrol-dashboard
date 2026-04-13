@@ -1,4 +1,18 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+
+import {
+  dashboardQueryKeys,
+  fetchNetworkInfo,
+  fetchPorts,
+  fetchProcesses
+} from '../api/client';
+import {
+  actionEventSchema,
+  streamNetworkSnapshotSchema,
+  streamProcessSnapshotSchema,
+  streamSystemSnapshotSchema
+} from '../api/schemas';
 
 const DashboardStreamContext = createContext(null);
 
@@ -21,29 +35,35 @@ const initialState = {
 export function DashboardStreamProvider({ children }) {
   const [state, setState] = useState(initialState);
   const [clock, setClock] = useState(Date.now());
+  const queryClient = useQueryClient();
   const reconnectTimerRef = useRef(null);
   const reconnectAttemptRef = useRef(0);
 
-  const applyJson = async (response) => {
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    return response.json();
-  };
-
   const refreshProcesses = async () => {
-    const data = await applyJson(await fetch('/api/processes'));
+    const data = await queryClient.fetchQuery({
+      queryKey: dashboardQueryKeys.processes,
+      queryFn: fetchProcesses
+    });
     setState((prev) => ({ ...prev, processes: data, lastUpdate: Date.now() }));
+    return data;
   };
 
   const refreshPorts = async () => {
-    const data = await applyJson(await fetch('/api/ports'));
+    const data = await queryClient.fetchQuery({
+      queryKey: dashboardQueryKeys.ports,
+      queryFn: fetchPorts
+    });
     setState((prev) => ({ ...prev, ports: data, lastUpdate: Date.now() }));
+    return data;
   };
 
   const refreshNetwork = async () => {
-    const data = await applyJson(await fetch('/api/network/info'));
+    const data = await queryClient.fetchQuery({
+      queryKey: dashboardQueryKeys.networkInfo,
+      queryFn: fetchNetworkInfo
+    });
     setState((prev) => ({ ...prev, networkInfo: data, lastUpdate: Date.now() }));
+    return data;
   };
 
   useEffect(() => {
@@ -82,7 +102,13 @@ export function DashboardStreamProvider({ children }) {
       });
 
       source.addEventListener('system_snapshot', (event) => {
-        const payload = JSON.parse(event.data || '{}');
+        const payload = streamSystemSnapshotSchema.parse(JSON.parse(event.data || '{}'));
+        if (payload.system_info) {
+          queryClient.setQueryData(dashboardQueryKeys.systemInfo, payload.system_info);
+        }
+        if (payload.performance) {
+          queryClient.setQueryData(dashboardQueryKeys.systemPerformance, payload.performance);
+        }
         setState((prev) => ({
           ...prev,
           systemInfo: payload.system_info || prev.systemInfo,
@@ -93,7 +119,10 @@ export function DashboardStreamProvider({ children }) {
       });
 
       source.addEventListener('process_snapshot', (event) => {
-        const payload = JSON.parse(event.data || '{}');
+        const payload = streamProcessSnapshotSchema.parse(JSON.parse(event.data || '{}'));
+        if (payload.processes) {
+          queryClient.setQueryData(dashboardQueryKeys.processes, payload.processes);
+        }
         setState((prev) => ({
           ...prev,
           processes: payload.processes || prev.processes,
@@ -102,7 +131,13 @@ export function DashboardStreamProvider({ children }) {
       });
 
       source.addEventListener('network_snapshot', (event) => {
-        const payload = JSON.parse(event.data || '{}');
+        const payload = streamNetworkSnapshotSchema.parse(JSON.parse(event.data || '{}'));
+        if (payload.ports) {
+          queryClient.setQueryData(dashboardQueryKeys.ports, payload.ports);
+        }
+        if (payload.network_info) {
+          queryClient.setQueryData(dashboardQueryKeys.networkInfo, payload.network_info);
+        }
         setState((prev) => ({
           ...prev,
           ports: payload.ports || prev.ports,
@@ -112,7 +147,7 @@ export function DashboardStreamProvider({ children }) {
       });
 
       source.addEventListener('action', (event) => {
-        const payload = JSON.parse(event.data || '{}');
+        const payload = actionEventSchema.parse(JSON.parse(event.data || '{}'));
         setState((prev) => ({
           ...prev,
           lastAction: payload,
@@ -151,7 +186,7 @@ export function DashboardStreamProvider({ children }) {
         clearTimeout(reconnectTimerRef.current);
       }
     };
-  }, []);
+  }, [queryClient]);
 
   const stale = useMemo(() => {
     if (!state.lastUpdate) return true;

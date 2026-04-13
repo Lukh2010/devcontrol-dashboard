@@ -1,5 +1,6 @@
 import React from 'react';
 import { Wifi } from 'lucide-react';
+import { motion } from 'motion/react';
 
 const NetworkHub = ({ networkInfo, loading }) => {
   const getConnectionStatus = () => {
@@ -19,7 +20,12 @@ const NetworkHub = ({ networkInfo, loading }) => {
 
   if (loading || !networkInfo) {
     return (
-      <section className="panel">
+      <motion.section
+        className="panel"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, ease: 'easeOut' }}
+      >
         <div className="panel-header">
           <div className="panel-title-wrap">
             <span className="panel-icon">
@@ -34,14 +40,19 @@ const NetworkHub = ({ networkInfo, loading }) => {
         <div className="panel-body">
           <div className="center-empty">Loading network information...</div>
         </div>
-      </section>
+      </motion.section>
     );
   }
 
   const connectionStatus = getConnectionStatus();
 
   return (
-    <section className="panel">
+    <motion.section
+      className="panel"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25, ease: 'easeOut' }}
+    >
       <div className="panel-header">
         <div className="panel-title-wrap">
           <span className="panel-icon">
@@ -60,7 +71,13 @@ const NetworkHub = ({ networkInfo, loading }) => {
       <div className="panel-body stack">
         <div className="network-grid">
           {Object.entries(networkInfo.interfaces || {}).map(([interfaceName, addresses]) => (
-            <div key={interfaceName} className="mini-card">
+            <motion.div
+              key={interfaceName}
+              className="mini-card"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+            >
               <p className="metric-eyebrow">{interfaceName}</p>
               <div className="stack">
                 {addresses.map((addr, index) => (
@@ -70,26 +87,26 @@ const NetworkHub = ({ networkInfo, loading }) => {
                   </div>
                 ))}
               </div>
-            </div>
+            </motion.div>
           ))}
         </div>
 
         <div className="metrics-three">
-          <div className="mini-card">
+          <motion.div className="mini-card" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
             <p className="metric-eyebrow">Hostname</p>
             <p className="metric-reading">{networkInfo.hostname || 'Unknown'}</p>
-          </div>
-          <div className="mini-card">
+          </motion.div>
+          <motion.div className="mini-card" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
             <p className="metric-eyebrow">Interfaces</p>
             <p className="metric-reading">{Object.keys(networkInfo.interfaces || {}).length}</p>
-          </div>
-          <div className="mini-card">
+          </motion.div>
+          <motion.div className="mini-card" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
             <p className="metric-eyebrow">Gateway</p>
             <p className="metric-reading">{networkInfo.default_gateway || 'Unknown'}</p>
-          </div>
+          </motion.div>
         </div>
       </div>
-    </section>
+    </motion.section>
   );
 };
 

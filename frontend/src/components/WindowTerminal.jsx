@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Copy, Square, Terminal } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+
+import { useAuthStatus } from '../features/dashboard/hooks/useAuthStatus';
 
 const WindowTerminal = ({ controlPassword }) => {
   const [connected, setConnected] = useState(false);
@@ -12,7 +15,8 @@ const WindowTerminal = ({ controlPassword }) => {
   const outputEndRef = useRef(null);
   const wsRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
-  const [passwordRequired, setPasswordRequired] = useState(true);
+  const authStatusQuery = useAuthStatus();
+  const passwordRequired = authStatusQuery.data?.enabled ?? true;
 
   useEffect(() => {
     let cancelled = false;
@@ -41,7 +45,6 @@ const WindowTerminal = ({ controlPassword }) => {
           setConnected(false);
           wsRef.current = null;
           if (event.code === 4401) {
-            setPasswordRequired(true);
             addOutput({ type: 'error', text: 'Wrong control password. Update it above to reconnect.' });
             return;
           }
@@ -59,44 +62,17 @@ const WindowTerminal = ({ controlPassword }) => {
       }
     };
 
-    const loadAuthStatus = async () => {
-      try {
-        const response = await fetch('/api/auth/status');
-        const data = await response.json();
-        if (cancelled) {
-          return;
-        }
-
-        const enabled = Boolean(data.enabled);
-        setPasswordRequired(enabled);
-
-        if (enabled && !controlPassword) {
-          setConnected(false);
-          setOutput([{ type: 'system', text: 'Enter the control password to unlock terminal access.' }]);
-          if (wsRef.current) {
-            wsRef.current.close();
-            wsRef.current = null;
-          }
-          return;
-        }
-
-        connectWebSocket();
-      } catch {
-        if (cancelled) {
-          return;
-        }
-
-        if (!controlPassword) {
-          setConnected(false);
-          setOutput([{ type: 'system', text: 'Enter the control password to unlock terminal access.' }]);
-          return;
-        }
-
-        connectWebSocket();
+    if (passwordRequired && !controlPassword) {
+      setConnected(false);
+      setOutput([{ type: 'system', text: 'Enter the control password to unlock terminal access.' }]);
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
       }
-    };
+      return undefined;
+    }
 
-    loadAuthStatus();
+    connectWebSocket();
 
     return () => {
       cancelled = true;
@@ -107,7 +83,7 @@ const WindowTerminal = ({ controlPassword }) => {
         wsRef.current.close();
       }
     };
-  }, [controlPassword]);
+  }, [controlPassword, passwordRequired]);
 
   useEffect(() => {
     if (outputEndRef.current) {
@@ -237,7 +213,12 @@ const WindowTerminal = ({ controlPassword }) => {
   };
 
   return (
-    <section className="panel">
+    <motion.section
+      className="panel"
+      initial={{ opacity: 0, scale: 0.985 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.24, ease: 'easeOut' }}
+    >
       <div className="panel-header">
         <div className="panel-title-wrap">
           <span className="panel-icon">
@@ -311,9 +292,21 @@ const WindowTerminal = ({ controlPassword }) => {
         ) : null}
       </div>
 
-      {sudoModal && (
-        <div className="modal-backdrop">
-          <div className="modal-card">
+      <AnimatePresence>
+        {sudoModal && (
+          <motion.div
+            className="modal-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="modal-card"
+              initial={{ opacity: 0, y: 24, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 18, scale: 0.97 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+            >
             <div className="panel-title-wrap">
               <span className="panel-icon">
                 <Terminal size={18} />
@@ -343,10 +336,11 @@ const WindowTerminal = ({ controlPassword }) => {
                 Execute
               </button>
             </div>
-          </div>
-        </div>
-      )}
-    </section>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.section>
   );
 };
 

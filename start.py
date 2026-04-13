@@ -197,7 +197,6 @@ class DevControlStarter:
         print("Dashboard: http://localhost:3000")
         print("Backend API: http://localhost:8000")
         print("WebSocket Terminal: ws://localhost:8003")
-        print("\nReal Terminal ready! Navigate to TERMINAL tab in dashboard.")
         print("\nMonitoring server status...")
         
         try:

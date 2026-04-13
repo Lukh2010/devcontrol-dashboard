@@ -307,6 +307,34 @@ input {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.overview-card {
+  min-height: 170px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.overview-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.overview-card-icon {
+  width: 32px;
+  height: 32px;
+}
+
+.overview-reading {
+  font-size: clamp(1.1rem, 1.8vw, 1.5rem);
+}
+
 .mini-card {
   padding: 16px;
   border-radius: 16px;
@@ -663,6 +691,10 @@ input {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .overview-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
 }
 
 @media (max-width: 760px) {
@@ -681,7 +713,8 @@ input {
 
   .toolbar-block-summary,
   .metrics-three,
-  .nav-pills {
+  .nav-pills,
+  .overview-grid {
     grid-template-columns: 1fr;
   }
 

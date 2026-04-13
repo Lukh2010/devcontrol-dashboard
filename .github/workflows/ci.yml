@@ -1,152 +1,311 @@
-name: CI/CD Pipeline
+name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches:
+      - main
+      - develop
   pull_request:
-    branches: [ main ]
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
   security-events: write
-  actions: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  test-backend:
+  backend:
+    name: Backend / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ['3.10', 3.11, 3.12]
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-    
-    - name: Install dependencies
-      run: |
-        cd backend
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov flake8
-    
-    - name: Lint with flake8
-      run: |
-        cd backend
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    
-    - name: Test with pytest
-      run: |
-        cd backend
-        # Create a simple test file if it doesn't exist
-        if [ ! -f "test_app.py" ]; then
-          echo "import sys; print('Backend tests passed')" > test_app.py
-        fi
-        pytest test_app.py --cov=./ --cov-report=xml || true
-    
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        file: ./backend/coverage.xml
-        flags: backend
-        name: backend-coverage
-        fail_ci_if_error: false
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
 
-  test-frontend:
-    runs-on: ubuntu-latest
-    
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        cache: 'npm'
-        cache-dependency-path: frontend
-    
-    - name: Install dependencies
-      run: |
-        cd frontend
-        # Use npm install instead of ci since package-lock.json is not in repo
-        npm install
-    
-    - name: Run tests
-      run: |
-        cd frontend
-        # Create a simple test if it doesn't exist
-        if [ ! -f "src/App.test.js" ]; then
-          mkdir -p src
-          echo "test('renders without crashing', () => { console.log('Frontend tests passed'); });" > src/App.test.js
-        fi
-        npm test -- --coverage --watchAll=false || echo "Tests completed with warnings"
-    
-    - name: Build
-      run: |
-        cd frontend
-        npm run build
-    
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-files
-        path: frontend/dist/
-        retention-days: 30
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend and test dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest flake8
+
+      - name: Static syntax check
+        run: python -m compileall backend
+
+      - name: Lint backend
+        working-directory: backend
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --max-complexity=12 --max-line-length=127 --statistics
+
+      - name: Run backend pytest suite if present
+        working-directory: backend
+        run: |
+          if find . -maxdepth 2 \( -name "test_*.py" -o -name "*_test.py" \) | grep -q .; then
+            pytest -q
+          else
+            echo "No backend pytest files found; relying on smoke checks."
+          fi
+
+      - name: Start backend
+        working-directory: backend
+        env:
+          DEVCONTROL_PASSWORD: ci-password
+        run: |
+          python app.py > ../backend-ci.log 2>&1 &
+          echo $! > ../backend-ci.pid
+
+      - name: Wait for backend readiness
+        run: |
+          python - <<'PY'
+          import time
+          import urllib.request
+
+          url = "http://127.0.0.1:8000/api/system/info"
+          deadline = time.time() + 30
+          last_error = None
+
+          while time.time() < deadline:
+            try:
+              with urllib.request.urlopen(url, timeout=3) as response:
+                if response.status == 200:
+                  print("Backend is ready")
+                  raise SystemExit(0)
+            except Exception as exc:
+              last_error = exc
+              time.sleep(1)
+
+          raise SystemExit(f"Backend failed to become ready: {last_error}")
+          PY
+
+      - name: Backend API smoke tests
+        run: |
+          python - <<'PY'
+          import json
+          import urllib.error
+          import urllib.request
+
+          BASE = "http://127.0.0.1:8000"
+
+          def request_json(path, method="GET", body=None, headers=None, expected_status=200):
+            data = None
+            request_headers = headers or {}
+            if body is not None:
+              data = json.dumps(body).encode("utf-8")
+              request_headers = {**request_headers, "Content-Type": "application/json"}
+
+            request = urllib.request.Request(
+              f"{BASE}{path}",
+              data=data,
+              headers=request_headers,
+              method=method
+            )
+
+            try:
+              with urllib.request.urlopen(request, timeout=10) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+                assert response.status == expected_status, (path, response.status, payload)
+                return payload
+            except urllib.error.HTTPError as exc:
+              payload = json.loads(exc.read().decode("utf-8"))
+              assert exc.code == expected_status, (path, exc.code, payload)
+              return payload
+
+          auth_status = request_json("/api/auth/status")
+          assert auth_status["enabled"] is True
+
+          invalid = request_json("/api/auth/validate", method="POST", body={"password": "wrong"})
+          assert invalid["valid"] is False
+
+          valid = request_json("/api/auth/validate", method="POST", body={"password": "ci-password"})
+          assert valid["valid"] is True
+
+          system_info = request_json("/api/system/info")
+          assert system_info["hostname"]
+
+          performance = request_json("/api/system/performance")
+          assert "cpu_percent" in performance
+
+          processes = request_json("/api/processes")
+          assert isinstance(processes, list)
+
+          ports = request_json("/api/ports")
+          assert isinstance(ports, list)
+
+          network = request_json("/api/network/info")
+          assert "interfaces" in network
+
+          unauthorized = request_json(
+            "/api/commands/run",
+            method="POST",
+            body={"command": "echo unauthorized"},
+            expected_status=401
+          )
+          assert "error" in unauthorized
+
+          authorized = request_json(
+            "/api/commands/run",
+            method="POST",
+            body={"command": "echo ci"},
+            headers={"X-DevControl-Password": "ci-password"}
+          )
+          assert authorized["success"] is True
+          assert "ci" in authorized["stdout"].lower()
+
+          request_json(
+            "/api/port/65535",
+            method="DELETE",
+            headers={"X-DevControl-Password": "ci-password"},
+            expected_status=404
+          )
+
+          print("Backend smoke tests passed")
+          PY
+
+      - name: Stop backend
+        if: always()
+        run: |
+          if [ -f backend-ci.pid ]; then
+            kill "$(cat backend-ci.pid)" || true
+          fi
+
+      - name: Upload backend log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-log-py${{ matrix.python-version }}
+          path: backend-ci.log
+          retention-days: 7
+
+  frontend-quality:
+    name: Frontend Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint frontend
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Run Vitest
+        working-directory: frontend
+        run: npm run test
+
+      - name: Upload frontend build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 7
+
+  frontend-e2e:
+    name: Frontend E2E
+    runs-on: ubuntu-latest
+    needs: frontend-quality
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright
+        working-directory: frontend
+        run: npm run test:e2e
+
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+          retention-days: 7
+
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependency review
+        uses: actions/dependency-review-action@v4
 
   security-scan:
+    name: Security Scan
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
-      with:
-        scan-type: 'fs'
-        scan-ref: '.'
-        format: 'sarif'
-        output: 'trivy-results.sarif'
-      continue-on-error: true
-    
-    - name: Upload Trivy scan results
-      uses: github/codeql-action/upload-sarif@v4
-      with:
-        sarif_file: 'trivy-results.sarif'
-      continue-on-error: true
 
-  deploy-docs:
-    needs: [test-backend, test-frontend]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Create docs directory
-      run: |
-        mkdir -p docs
-        echo "# DevControl Dashboard Documentation" > docs/index.md
-        echo "## API Documentation" >> docs/index.md
-        echo "### Backend API" >> docs/index.md
-        echo "- GET /api/system/info - System information" >> docs/index.md
-        echo "- GET /api/system/performance - Performance metrics" >> docs/index.md
-        echo "- GET /api/processes - Process list" >> docs/index.md
-        echo "- GET /api/ports - Port information" >> docs/index.md
-        echo "- POST /api/commands/run - Execute command" >> docs/index.md
-        echo "- GET /api/network/info - Network information" >> docs/index.md
-        echo "- POST /api/network/ping - Ping host" >> docs/index.md
-    
-    - name: Deploy to GitHub Pages
-      uses: peaceiris/actions-gh-pages@v3
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./docs
-      continue-on-error: true
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@v0.33.1
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif

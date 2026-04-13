@@ -1,12 +1,18 @@
 import React from 'react';
 import { Activity } from 'lucide-react';
+import { motion } from 'motion/react';
 
 const formatPercent = (value) => `${value.toFixed(1)}%`;
 
 const SystemMonitor = ({ performanceData }) => {
   if (!performanceData) {
     return (
-      <section className="panel">
+      <motion.section
+        className="panel"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, ease: 'easeOut' }}
+      >
         <div className="panel-header">
           <div className="panel-title-wrap">
             <span className="panel-icon">
@@ -21,7 +27,7 @@ const SystemMonitor = ({ performanceData }) => {
         <div className="panel-body">
           <div className="center-empty">Loading system data...</div>
         </div>
-      </section>
+      </motion.section>
     );
   }
 
@@ -32,7 +38,12 @@ const SystemMonitor = ({ performanceData }) => {
   ];
 
   return (
-    <section className="panel">
+    <motion.section
+      className="panel"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25, ease: 'easeOut' }}
+    >
       <div className="panel-header">
         <div className="panel-title-wrap">
           <span className="panel-icon">
@@ -47,17 +58,23 @@ const SystemMonitor = ({ performanceData }) => {
       <div className="panel-body">
         <div className="metrics-three">
           {metrics.map((metric) => (
-            <div key={metric.label} className="mini-card">
+            <motion.div
+              key={metric.label}
+              className="mini-card"
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+            >
               <p className="metric-eyebrow">{metric.label}</p>
               <p className="metric-reading">{formatPercent(metric.value)}</p>
               <div className="progress-track">
                 <div className="progress-fill" style={{ width: `${metric.value}%` }} />
               </div>
-            </div>
+            </motion.div>
           ))}
         </div>
       </div>
-    </section>
+    </motion.section>
   );
 };
 

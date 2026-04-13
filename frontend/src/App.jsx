@@ -1,11 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Activity, Cpu, Network, Terminal, Wifi } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import SystemMonitor from './components/SystemMonitor';
+import OverviewHighlights from './components/OverviewHighlights';
 import PortControl from './components/PortControl';
 import NetworkHub from './components/NetworkHub';
 import WindowTerminal from './components/WindowTerminal';
 import ProcessManager from './components/ProcessManager';
-import { DashboardStreamProvider, useDashboardStream } from './context/DashboardStreamContext';
+import { DashboardStreamProvider, useDashboardStream } from './features/dashboard/context/DashboardStreamContext';
+import { useAuthStatus, usePasswordValidation } from './features/dashboard/hooks/useAuthStatus';
 
 const PANELS = [
   { id: 'overview', label: 'Overview', icon: Activity },
@@ -19,8 +22,6 @@ function AppContent() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [activePanel, setActivePanel] = useState('overview');
   const [controlPassword, setControlPassword] = useState(() => sessionStorage.getItem('devcontrol-password') || '');
-  const [passwordProtectionEnabled, setPasswordProtectionEnabled] = useState(true);
-  const [authState, setAuthState] = useState(controlPassword ? 'checking' : 'idle');
 
   const {
     systemInfo,
@@ -29,6 +30,7 @@ function AppContent() {
     processes,
     networkInfo,
     isAdmin,
+    terminalState,
     streamStatus,
     reconnectAttempt,
     streamError,
@@ -38,81 +40,44 @@ function AppContent() {
     refreshPorts
   } = useDashboardStream();
 
+  const authStatusQuery = useAuthStatus();
+  const passwordProtectionEnabled = authStatusQuery.data?.enabled ?? true;
+  const passwordValidationQuery = usePasswordValidation(controlPassword, passwordProtectionEnabled);
+
+  const authState = useMemo(() => {
+    if (!passwordProtectionEnabled) {
+      return 'disabled';
+    }
+    if (!controlPassword) {
+      return 'idle';
+    }
+    if (passwordValidationQuery.isLoading || passwordValidationQuery.isFetching) {
+      return 'checking';
+    }
+    if (passwordValidationQuery.isError) {
+      return 'error';
+    }
+    return passwordValidationQuery.data?.valid ? 'valid' : 'invalid';
+  }, [
+    controlPassword,
+    passwordProtectionEnabled,
+    passwordValidationQuery.data?.valid,
+    passwordValidationQuery.isError,
+    passwordValidationQuery.isFetching,
+    passwordValidationQuery.isLoading
+  ]);
+
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const loadAuthStatus = async () => {
-      try {
-        const response = await fetch('/api/auth/status');
-        const data = await response.json();
-        if (!cancelled) {
-          const enabled = Boolean(data.enabled);
-          setPasswordProtectionEnabled(enabled);
-          if (!enabled) {
-            setAuthState('disabled');
-            setControlPassword('');
-            sessionStorage.removeItem('devcontrol-password');
-          }
-        }
-      } catch {
-        if (!cancelled) {
-          setPasswordProtectionEnabled(true);
-        }
-      }
-    };
-
-    loadAuthStatus();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
     if (!passwordProtectionEnabled) {
-      setAuthState('disabled');
-      return undefined;
+      setControlPassword('');
+      sessionStorage.removeItem('devcontrol-password');
     }
-
-    if (!controlPassword) {
-      setAuthState('idle');
-      return undefined;
-    }
-
-    let cancelled = false;
-    setAuthState('checking');
-
-    const timeoutId = setTimeout(async () => {
-      try {
-        const response = await fetch('/api/auth/validate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ password: controlPassword })
-        });
-
-        const data = await response.json();
-        if (!cancelled) {
-          setAuthState(response.ok && data.valid ? 'valid' : 'invalid');
-        }
-      } catch {
-        if (!cancelled) {
-          setAuthState('error');
-        }
-      }
-    }, 250);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timeoutId);
-    };
-  }, [controlPassword, passwordProtectionEnabled]);
+  }, [passwordProtectionEnabled]);
 
   const handlePasswordChange = (value) => {
     setControlPassword(value);
@@ -167,34 +132,59 @@ function AppContent() {
   const renderContent = () => {
     if (activePanel === 'overview') {
       return (
-        <div className="workspace-overview">
+        <motion.div
+          key="overview"
+          className="workspace-overview"
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -12 }}
+          transition={{ duration: 0.28, ease: 'easeOut' }}
+        >
           <SystemMonitor performanceData={performanceData} />
-          <PortControl
-            controlPassword={controlPassword}
+          <OverviewHighlights
+            systemInfo={systemInfo}
+            processes={processes}
             ports={ports}
-            loading={!ports?.length && streamStatus !== 'connected'}
-            onRefresh={refreshPorts}
+            networkInfo={networkInfo}
+            streamStatus={streamStatus}
+            terminalState={terminalState}
+            isAdmin={isAdmin}
+            stale={stale}
           />
-        </div>
+        </motion.div>
       );
     }
 
     if (activePanel === 'ports') {
       return (
-        <div className="workspace-single">
+        <motion.div
+          key="ports"
+          className="workspace-single"
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -12 }}
+          transition={{ duration: 0.28, ease: 'easeOut' }}
+        >
           <PortControl
             controlPassword={controlPassword}
             ports={ports}
             loading={!ports?.length && streamStatus !== 'connected'}
             onRefresh={refreshPorts}
           />
-        </div>
+        </motion.div>
       );
     }
 
     if (activePanel === 'process-manager') {
       return (
-        <div className="workspace-single">
+        <motion.div
+          key="process-manager"
+          className="workspace-single"
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -12 }}
+          transition={{ duration: 0.28, ease: 'easeOut' }}
+        >
           <ProcessManager
             controlPassword={controlPassword}
             processes={processes}
@@ -202,31 +192,50 @@ function AppContent() {
             isAdmin={isAdmin}
             onRefresh={refreshProcesses}
           />
-        </div>
+        </motion.div>
       );
     }
 
     if (activePanel === 'commands') {
       return (
-        <div className="workspace-single">
+        <motion.div
+          key="commands"
+          className="workspace-single"
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -12 }}
+          transition={{ duration: 0.28, ease: 'easeOut' }}
+        >
           <WindowTerminal controlPassword={controlPassword} />
-        </div>
+        </motion.div>
       );
     }
 
     return (
-      <div className="workspace-single">
+      <motion.div
+        key="network"
+        className="workspace-single"
+        initial={{ opacity: 0, y: 18 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -12 }}
+        transition={{ duration: 0.28, ease: 'easeOut' }}
+      >
         <NetworkHub
           networkInfo={networkInfo}
           loading={!networkInfo && streamStatus !== 'connected'}
         />
-      </div>
+      </motion.div>
     );
   };
 
   return (
-    <div className="app-shell compact-shell">
-      <header className="topbar">
+    <motion.div
+      className="app-shell compact-shell"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: 'easeOut' }}
+    >
+      <motion.header className="topbar" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.05 }}>
         <div>
           <div className="topbar-kicker">DevControl</div>
           <h1 className="topbar-title">Local Control Dashboard</h1>
@@ -248,12 +257,24 @@ function AppContent() {
           <div className="topbar-chip">{lastHeartbeat ? `Heartbeat ${new Date(lastHeartbeat).toLocaleTimeString()}` : 'Awaiting heartbeat...'}</div>
           <div className="topbar-chip">{formatTime(currentTime)}</div>
         </div>
-      </header>
+      </motion.header>
 
-      <section className="toolbar-panel panel">
+      <motion.section
+        className="toolbar-panel panel"
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.08 }}
+      >
         <div className="toolbar-row">
-          {passwordProtectionEnabled ? (
-            <div className="toolbar-block">
+          <AnimatePresence initial={false}>
+            {passwordProtectionEnabled ? (
+              <motion.div
+                className="toolbar-block"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+              >
               <label className="field-label" htmlFor="control-password">Control Password</label>
               <input
                 id="control-password"
@@ -263,9 +284,10 @@ function AppContent() {
                 onChange={(event) => handlePasswordChange(event.target.value)}
                 placeholder="Enter startup password"
               />
-              <div className="input-hint">{streamError || passwordHint}</div>
-            </div>
-          ) : null}
+                <div className="input-hint">{streamError || passwordHint}</div>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
 
           <div className="toolbar-block toolbar-block-summary">
             <div className="summary-card">
@@ -287,20 +309,24 @@ function AppContent() {
 
         <nav className="nav-pills compact-pills">
           {PANELS.map(({ id, label, icon: Icon }) => (
-            <button
+            <motion.button
               key={id}
               className={`nav-pill ${activePanel === id ? 'active' : ''}`}
               onClick={() => setActivePanel(id)}
+              whileHover={{ y: -2 }}
+              whileTap={{ scale: 0.98 }}
             >
               <Icon size={16} />
               {label}
-            </button>
+            </motion.button>
           ))}
         </nav>
-      </section>
+      </motion.section>
 
-      {renderContent()}
-    </div>
+      <AnimatePresence mode="wait" initial={false}>
+        {renderContent()}
+      </AnimatePresence>
+    </motion.div>
   );
 }
 

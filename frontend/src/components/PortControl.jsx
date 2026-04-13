@@ -1,25 +1,18 @@
 import React, { useState } from 'react';
 import { Network, ShieldAlert } from 'lucide-react';
 
+import { useKillPortMutation } from '../features/dashboard/hooks/useActionMutations';
+
 const PortControl = ({ controlPassword, ports, loading, onRefresh }) => {
   const [message, setMessage] = useState('');
+  const killPortMutation = useKillPortMutation(controlPassword);
 
   const killProcess = async (port) => {
     try {
-      const response = await fetch(`/api/port/${port}`, {
-        method: 'DELETE',
-        headers: {
-          'X-DevControl-Password': controlPassword || ''
-        }
-      });
-
-      const result = await response.json();
-      setMessage(response.ok ? `Success: ${result.message}` : `Error: ${result.error || 'Unknown error'}`);
+      const result = await killPortMutation.mutateAsync(port);
+      setMessage(`Success: ${result.message}`);
       setTimeout(() => setMessage(''), 3000);
-      if (response.ok) {
-        onRefresh?.();
-      }
-
+      onRefresh?.();
     } catch (error) {
       setMessage(`Network error: ${error.message}`);
       setTimeout(() => setMessage(''), 3000);
@@ -70,7 +63,7 @@ const PortControl = ({ controlPassword, ports, loading, onRefresh }) => {
                     <td>{portInfo.pid}</td>
                     <td>
                       <button className="danger-button" onClick={() => killProcess(portInfo.port)}>
-                        Kill
+                        {killPortMutation.isPending ? 'Killing...' : 'Kill'}
                       </button>
                     </td>
                   </tr>

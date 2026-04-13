@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
 import { AlertTriangle, Cpu, RefreshCw, Trash2 } from 'lucide-react';
 
+import { useKillProcessMutation } from '../features/dashboard/hooks/useActionMutations';
+
 const ProcessManager = ({ controlPassword, processes, loading, isAdmin, onRefresh }) => {
   const [error, setError] = useState(null);
   const [killingPid, setKillingPid] = useState(null);
+  const killProcessMutation = useKillProcessMutation(controlPassword);
 
   const killProcess = async (pid) => {
     if (!isAdmin) {
@@ -15,18 +18,7 @@ const ProcessManager = ({ controlPassword, processes, loading, isAdmin, onRefres
       setKillingPid(pid);
       setError(null);
 
-      const response = await fetch(`/api/processes/${pid}/kill`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-DevControl-Password': controlPassword || ''
-        }
-      });
-
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to kill process');
-      }
+      await killProcessMutation.mutateAsync(pid);
       setTimeout(() => {
         onRefresh?.().catch((refreshError) => setError(refreshError.message));
       }, 600);
