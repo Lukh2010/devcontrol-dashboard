@@ -151,6 +151,7 @@ instance/
 .pytest_cache/
 .tox/
 htmlcov/
+backend/tests/test_api_contract.py
 
 # Documentation
 docs/_build/

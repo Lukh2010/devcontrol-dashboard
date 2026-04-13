@@ -204,7 +204,6 @@ def api_docs():
             "/api/processes": "Get running processes with CPU and memory usage",
             "/api/ports": "Get active network ports and listening services",
             "/api/network/info": "Get network interface information",
-            "/api/network/ping": "Ping a host (POST with host)",
             "/api/commands/run": "Execute system command (POST with command)"
         },
         "methods": {
@@ -212,11 +211,6 @@ def api_docs():
             "POST": "Submit data/execute commands"
         },
         "examples": {
-            "ping_command": {
-                "url": "/api/network/ping",
-                "method": "POST",
-                "body": {"host": "google.com"}
-            },
             "run_command": {
                 "url": "/api/commands/run", 
                 "method": "POST",
@@ -471,67 +465,6 @@ def get_network_info():
             "default_gateway": default_gateway,
             "hostname": socket.gethostname()
         })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/network/ping", methods=['POST'])
-def ping_host():
-    """Ping a host to check latency"""
-    try:
-        data = request.get_json()
-        host = data.get('host', '')
-        param = '-n' if platform.system().lower() == 'windows' else '-c'
-        command = ['ping', param, '4', host]
-        
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        
-        if result.returncode == 0:
-            # Parse ping results
-            output_lines = result.stdout.split('\n')
-            latency_info = {}
-            
-            for line in output_lines:
-                if "time=" in line.lower() or "zeit=" in line.lower():
-                    # Extract latency from ping output
-                    if "time=" in line:
-                        time_part = line.split("time=")[1].split()[0]
-                    else:  # German Windows
-                        time_part = line.split("Zeit=")[1].split()[0]
-                    
-                    try:
-                        latency_ms = float(time_part.replace("ms", ""))
-                        latency_info = {
-                            "host": host,
-                            "success": True,
-                            "latency_ms": latency_ms,
-                            "output": result.stdout
-                        }
-                        break
-                    except:
-                        continue
-            
-            if not latency_info:
-                latency_info = {
-                    "host": host,
-                    "success": True,
-                    "output": result.stdout
-                }
-        else:
-            latency_info = {
-                "host": host,
-                "success": False,
-                "error": result.stderr,
-                "output": result.stdout
-            }
-        
-        return jsonify(latency_info)
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "Ping request timed out"}), 408
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
