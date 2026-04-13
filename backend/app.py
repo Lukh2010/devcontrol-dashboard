@@ -719,25 +719,40 @@ def stream_events():
 
     def generate():
         try:
-            bootstrap_events = [
-                {"type": "system_snapshot", "payload": {
+            bootstrap_collectors = [
+                ("system_snapshot", lambda: {
                     "system_info": collect_system_info(),
                     "performance": collect_system_performance(interval=0),
                     "is_admin": collect_is_admin(),
                     "timestamp": time.time()
-                }},
-                {"type": "process_snapshot", "payload": {
+                }),
+                ("process_snapshot", lambda: {
                     "processes": collect_processes(),
                     "timestamp": time.time()
-                }},
-                {"type": "network_snapshot", "payload": {
+                }),
+                ("network_snapshot", lambda: {
                     "ports": collect_ports(),
                     "network_info": collect_network_info(),
                     "timestamp": time.time()
-                }},
+                }),
             ]
-            for event in bootstrap_events:
-                yield to_sse(event)
+            for event_type, collect_payload in bootstrap_collectors:
+                try:
+                    yield to_sse({
+                        "type": event_type,
+                        "payload": collect_payload()
+                    })
+                except Exception as bootstrap_error:
+                    yield to_sse({
+                        "type": "action",
+                        "payload": {
+                            "action": "bootstrap_snapshot_error",
+                            "status": "failed",
+                            "snapshot_type": event_type,
+                            "reason": str(bootstrap_error),
+                            "timestamp": time.time()
+                        }
+                    })
 
             while True:
                 try:
