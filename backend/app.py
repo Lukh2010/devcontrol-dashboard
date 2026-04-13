@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response, stream_with_context
 from flask_cors import CORS
 import psutil
 import socket
@@ -11,9 +11,11 @@ import json
 import threading
 import os
 import hmac
+import queue
 from pathlib import Path
 from urllib.parse import parse_qs
 from terminal_session import TerminalSessionManager
+from events import DashboardEventPublisher, to_sse
 
 app = Flask(__name__)
 CORS(app, origins="*")
@@ -97,6 +99,161 @@ def update_cpu_cache():
     except Exception as e:
         print(f"Error updating CPU cache: {e}")
 
+
+def collect_system_info():
+    return {
+        "platform": platform.system(),
+        "platform_release": platform.release(),
+        "platform_version": platform.version(),
+        "architecture": platform.machine(),
+        "hostname": socket.gethostname(),
+        "processor": platform.processor(),
+        "cpu_count": psutil.cpu_count(),
+        "memory_total": psutil.virtual_memory().total,
+        "memory_available": psutil.virtual_memory().available
+    }
+
+
+def collect_system_performance(interval=1):
+    cpu_percent = psutil.cpu_percent(interval=interval)
+    memory = psutil.virtual_memory()
+    disk = psutil.disk_usage('/')
+    return {
+        "cpu_percent": cpu_percent,
+        "cpu_count": psutil.cpu_count(),
+        "memory": {
+            "total": memory.total,
+            "available": memory.available,
+            "percent": memory.percent,
+            "used": memory.used,
+            "free": memory.free
+        },
+        "disk": {
+            "total": disk.total,
+            "used": disk.used,
+            "free": disk.free,
+            "percent": (disk.used / disk.total) * 100
+        },
+        "timestamp": time.time()
+    }
+
+
+def collect_processes():
+    update_cpu_cache()
+    processes = []
+    for proc in psutil.process_iter(['pid', 'name', 'memory_info', 'status']):
+        try:
+            pinfo = proc.info
+            cpu_percent = cpu_cache.get(proc.pid, 0)
+            memory_mb = pinfo['memory_info'].rss / 1024 / 1024 if pinfo['memory_info'] else 0
+            if pinfo['name'] and pinfo['name'] != 'System Idle Process':
+                processes.append({
+                    "pid": pinfo['pid'],
+                    "name": pinfo['name'] or 'Unknown',
+                    "cpu_percent": round(cpu_percent, 2),
+                    "memory_mb": round(memory_mb, 2),
+                    "status": pinfo['status']
+                })
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+    processes.sort(key=lambda x: x['cpu_percent'], reverse=True)
+    return processes[:15]
+
+
+def collect_ports():
+    connections = []
+    for conn in psutil.net_connections():
+        if conn.status == 'LISTEN':
+            try:
+                process = psutil.Process(conn.pid) if conn.pid else None
+                if process:
+                    connections.append({
+                        "port": conn.laddr.port,
+                        "process_name": process.name(),
+                        "pid": conn.pid,
+                        "status": conn.status
+                    })
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    connections.sort(key=lambda x: x['port'])
+    return connections
+
+
+def collect_network_info():
+    network_info = {}
+    for interface, addrs in psutil.net_if_addrs().items():
+        network_info[interface] = []
+        for addr in addrs:
+            if addr.family == socket.AF_INET:
+                network_info[interface].append({
+                    "family": "IPv4",
+                    "address": addr.address,
+                    "netmask": addr.netmask,
+                    "broadcast": addr.broadcast
+                })
+            elif addr.family == socket.AF_INET6:
+                network_info[interface].append({
+                    "family": "IPv6",
+                    "address": addr.address,
+                    "netmask": addr.netmask
+                })
+
+    default_gateway = "Unknown"
+    if platform.system() == "Windows":
+        try:
+            result = subprocess.run("ipconfig", capture_output=True, text=True)
+            lines = result.stdout.split('\n')
+            for line in lines:
+                if "Default Gateway" in line:
+                    gateway = line.split(":")[-1].strip()
+                    if gateway:
+                        default_gateway = gateway
+                        break
+        except Exception:
+            pass
+
+    return {
+        "interfaces": network_info,
+        "default_gateway": default_gateway,
+        "hostname": socket.gethostname()
+    }
+
+
+def collect_is_admin():
+    if platform.system() == 'Windows':
+        try:
+            import ctypes
+            return ctypes.windll.shell32.IsUserAnAdmin() != 0
+        except Exception:
+            return False
+    return os.geteuid() == 0 if hasattr(os, 'geteuid') else False
+
+
+event_publisher = DashboardEventPublisher(
+    collectors={
+        "system_snapshot": {
+            "interval": 4,
+            "collect": lambda: {
+                "system_info": collect_system_info(),
+                "performance": collect_system_performance(interval=0),
+                "is_admin": collect_is_admin()
+            }
+        },
+        "process_snapshot": {
+            "interval": 5,
+            "collect": lambda: {"processes": collect_processes()}
+        },
+        "network_snapshot": {
+            "interval": 10,
+            "collect": lambda: {
+                "ports": collect_ports(),
+                "network_info": collect_network_info()
+            }
+        }
+    }
+)
+event_publisher.start()
+
 # WebSocket server
 async def handle_websocket(websocket, path):
     """Handle WebSocket connections for terminal sessions"""
@@ -108,10 +265,20 @@ async def handle_websocket(websocket, path):
                 'type': 'error',
                 'message': PROTECTED_ENDPOINTS_MESSAGE
             }))
+            event_publisher.publish("action", {
+                "action": "terminal_state",
+                "status": "unauthorized",
+                "reason": "invalid_password"
+            })
             await websocket.close(code=4401, reason='Unauthorized')
             return
 
         session_id = await terminal_manager.create_session(websocket)
+        event_publisher.publish("action", {
+            "action": "terminal_state",
+            "status": "connected",
+            "session_id": session_id
+        })
         
         async for message in websocket:
             try:
@@ -135,6 +302,11 @@ async def handle_websocket(websocket, path):
     finally:
         if 'session_id' in locals():
             await terminal_manager.close_session(session_id)
+            event_publisher.publish("action", {
+                "action": "terminal_state",
+                "status": "disconnected",
+                "session_id": session_id
+            })
 
 def start_websocket_server():
     """Start WebSocket server in a separate thread"""
@@ -224,18 +396,7 @@ def api_docs():
 def get_system_info():
     """Get basic system information"""
     try:
-        system_info = {
-            "platform": platform.system(),
-            "platform_release": platform.release(),
-            "platform_version": platform.version(),
-            "architecture": platform.machine(),
-            "hostname": socket.gethostname(),
-            "processor": platform.processor(),
-            "cpu_count": psutil.cpu_count(),
-            "memory_total": psutil.virtual_memory().total,
-            "memory_available": psutil.virtual_memory().available
-        }
-        return jsonify(system_info)
+        return jsonify(collect_system_info())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -243,29 +404,7 @@ def get_system_info():
 def get_system_performance():
     """Get real-time system performance data"""
     try:
-        cpu_percent = psutil.cpu_percent(interval=1)
-        memory = psutil.virtual_memory()
-        disk = psutil.disk_usage('/')
-        
-        performance_data = {
-            "cpu_percent": cpu_percent,
-            "cpu_count": psutil.cpu_count(),
-            "memory": {
-                "total": memory.total,
-                "available": memory.available,
-                "percent": memory.percent,
-                "used": memory.used,
-                "free": memory.free
-            },
-            "disk": {
-                "total": disk.total,
-                "used": disk.used,
-                "free": disk.free,
-                "percent": (disk.used / disk.total) * 100
-            },
-            "timestamp": time.time()
-        }
-        return jsonify(performance_data)
+        return jsonify(collect_system_performance())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -273,35 +412,7 @@ def get_system_performance():
 def get_processes():
     """Get running processes with CPU and memory usage"""
     try:
-        # Update CPU cache if needed
-        update_cpu_cache()
-        
-        processes = []
-        
-        # Get all processes with their info
-        for proc in psutil.process_iter(['pid', 'name', 'memory_info', 'status']):
-            try:
-                pinfo = proc.info
-                
-                # Get CPU from cache
-                cpu_percent = cpu_cache.get(proc.pid, 0)
-                memory_mb = pinfo['memory_info'].rss / 1024 / 1024 if pinfo['memory_info'] else 0
-                
-                # Skip System Idle Process
-                if pinfo['name'] and pinfo['name'] != 'System Idle Process':
-                    processes.append({
-                        "pid": pinfo['pid'],
-                        "name": pinfo['name'] or 'Unknown',
-                        "cpu_percent": round(cpu_percent, 2),
-                        "memory_mb": round(memory_mb, 2),
-                        "status": pinfo['status']
-                    })
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                continue
-        
-        # Sort by CPU usage and return top 15
-        processes.sort(key=lambda x: x['cpu_percent'], reverse=True)
-        return jsonify(processes[:15])
+        return jsonify(collect_processes())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -309,24 +420,7 @@ def get_processes():
 def get_ports():
     """Get all active network connections and their associated processes"""
     try:
-        connections = []
-        for conn in psutil.net_connections():
-            if conn.status == 'LISTEN':
-                try:
-                    process = psutil.Process(conn.pid) if conn.pid else None
-                    if process:
-                        connections.append({
-                            "port": conn.laddr.port,
-                            "process_name": process.name(),
-                            "pid": conn.pid,
-                            "status": conn.status
-                        })
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-        
-        # Sort by port number
-        connections.sort(key=lambda x: x['port'])
-        return jsonify(connections)
+        return jsonify(collect_ports())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -342,16 +436,41 @@ def kill_process_by_port(port):
             if conn.status == 'LISTEN' and conn.laddr.port == port:
                 try:
                     if not conn.pid or not is_dashboard_pid(conn.pid):
+                        event_publisher.publish("action", {
+                            "action": "kill_by_port",
+                            "status": "failed",
+                            "port": port,
+                            "reason": "not_dashboard_pid"
+                        })
                         return jsonify({
                             "error": f"Port {port} is not owned by a dashboard-managed process"
                         }), 403
 
                     process = psutil.Process(conn.pid)
                     process.terminate()
+                    event_publisher.publish("action", {
+                        "action": "kill_by_port",
+                        "status": "success",
+                        "port": port,
+                        "pid": conn.pid,
+                        "process_name": process.name()
+                    })
                     return jsonify({"message": f"Process {process.name()} (PID: {conn.pid}) terminated successfully"})
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    event_publisher.publish("action", {
+                        "action": "kill_by_port",
+                        "status": "failed",
+                        "port": port,
+                        "reason": "access_denied_or_missing"
+                    })
                     return jsonify({"error": f"Cannot terminate process on port {port}"}), 403
         
+        event_publisher.publish("action", {
+            "action": "kill_by_port",
+            "status": "failed",
+            "port": port,
+            "reason": "port_not_found"
+        })
         return jsonify({"error": f"No process found using port {port}"}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -425,46 +544,7 @@ def run_command():
 def get_network_info():
     """Get network interface information"""
     try:
-        network_info = {}
-        for interface, addrs in psutil.net_if_addrs().items():
-            network_info[interface] = []
-            for addr in addrs:
-                if addr.family == socket.AF_INET:
-                    network_info[interface].append({
-                        "family": "IPv4",
-                        "address": addr.address,
-                        "netmask": addr.netmask,
-                        "broadcast": addr.broadcast
-                    })
-                elif addr.family == socket.AF_INET6:
-                    network_info[interface].append({
-                        "family": "IPv6",
-                        "address": addr.address,
-                        "netmask": addr.netmask
-                    })
-        
-        # Get default gateway
-        default_gateway = "Unknown"
-        
-        # Try to get default gateway on Windows
-        if platform.system() == "Windows":
-            try:
-                result = subprocess.run("ipconfig", capture_output=True, text=True)
-                lines = result.stdout.split('\n')
-                for line in lines:
-                    if "Default Gateway" in line:
-                        gateway = line.split(":")[-1].strip()
-                        if gateway:
-                            default_gateway = gateway
-                            break
-            except:
-                pass
-        
-        return jsonify({
-            "interfaces": network_info,
-            "default_gateway": default_gateway,
-            "hostname": socket.gethostname()
-        })
+        return jsonify(collect_network_info())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -500,6 +580,13 @@ def kill_process(pid):
             return jsonify({"error": f"Process {pid} not found"}), 404
         
         if not is_dashboard_pid(pid):
+            event_publisher.publish("action", {
+                "action": "kill_process",
+                "status": "failed",
+                "pid": pid,
+                "reason": "not_dashboard_pid",
+                "name": process_name
+            })
             return jsonify({
                 "error": "Can only kill dashboard processes",
                 "message": f"Process {pid} ({process_name}) is not a dashboard process"
@@ -513,6 +600,12 @@ def kill_process(pid):
             process.wait(timeout=3)
         except psutil.TimeoutExpired:
             process.kill()
+        event_publisher.publish("action", {
+            "action": "kill_process",
+            "status": "success",
+            "pid": pid,
+            "name": process_name
+        })
         
         return jsonify({
             "success": True,
@@ -522,8 +615,20 @@ def kill_process(pid):
         })
         
     except psutil.NoSuchProcess:
+        event_publisher.publish("action", {
+            "action": "kill_process",
+            "status": "failed",
+            "pid": pid,
+            "reason": "process_not_found"
+        })
         return jsonify({"error": f"Process {pid} not found"}), 404
     except psutil.AccessDenied:
+        event_publisher.publish("action", {
+            "action": "kill_process",
+            "status": "failed",
+            "pid": pid,
+            "reason": "access_denied"
+        })
         return jsonify({"error": f"Access denied to process {pid}"}), 403
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -532,28 +637,53 @@ def kill_process(pid):
 def is_admin():
     """Check if current user has administrator privileges"""
     try:
-        if platform.system() == 'Windows':
-            try:
-                import ctypes
-                is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
-                return jsonify({
-                    "is_admin": is_admin,
-                    "platform": platform.system()
-                })
-            except Exception as e:
-                return jsonify({
-                    "is_admin": False,
-                    "platform": platform.system(),
-                    "error": str(e)
-                })
-        else:
-            # Unix-like systems - check if running as root
-            return jsonify({
-                "is_admin": os.geteuid() == 0 if hasattr(os, 'geteuid') else False,
-                "platform": platform.system()
-            })
+        return jsonify({
+            "is_admin": collect_is_admin(),
+            "platform": platform.system()
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/events/stream")
+def stream_events():
+    """SSE stream for dashboard snapshots, heartbeat, and action events."""
+    subscriber_id, subscriber_queue = event_publisher.subscribe()
+
+    def generate():
+        try:
+            bootstrap_events = [
+                {"type": "system_snapshot", "payload": {
+                    "system_info": collect_system_info(),
+                    "performance": collect_system_performance(interval=0),
+                    "is_admin": collect_is_admin(),
+                    "timestamp": time.time()
+                }},
+                {"type": "process_snapshot", "payload": {
+                    "processes": collect_processes(),
+                    "timestamp": time.time()
+                }},
+                {"type": "network_snapshot", "payload": {
+                    "ports": collect_ports(),
+                    "network_info": collect_network_info(),
+                    "timestamp": time.time()
+                }},
+            ]
+            for event in bootstrap_events:
+                yield to_sse(event)
+
+            while True:
+                try:
+                    event = subscriber_queue.get(timeout=20)
+                    yield to_sse(event)
+                except queue.Empty:
+                    yield "event: heartbeat\ndata: {}\n\n"
+        finally:
+            event_publisher.unsubscribe(subscriber_id)
+    response = Response(stream_with_context(generate()), mimetype="text/event-stream")
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["X-Accel-Buffering"] = "no"
+    return response
 
 @app.route("/api/auth/validate", methods=["POST"])
 def validate_control_password():

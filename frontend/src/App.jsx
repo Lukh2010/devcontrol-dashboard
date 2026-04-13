@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Activity, Cpu, Network, Shield, Terminal, Wifi } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Activity, Cpu, Network, Terminal, Wifi } from 'lucide-react';
 import SystemMonitor from './components/SystemMonitor';
 import PortControl from './components/PortControl';
 import NetworkHub from './components/NetworkHub';
 import WindowTerminal from './components/WindowTerminal';
 import ProcessManager from './components/ProcessManager';
+import { DashboardStreamProvider, useDashboardStream } from './context/DashboardStreamContext';
 
 const PANELS = [
   { id: 'overview', label: 'Overview', icon: Activity },
@@ -14,128 +15,31 @@ const PANELS = [
   { id: 'network', label: 'Network', icon: Wifi }
 ];
 
-function App() {
-  const [systemInfo, setSystemInfo] = useState(null);
+function AppContent() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [activePanel, setActivePanel] = useState('overview');
   const [controlPassword, setControlPassword] = useState(() => sessionStorage.getItem('devcontrol-password') || '');
   const [authState, setAuthState] = useState(controlPassword ? 'checking' : 'idle');
-  const [performanceData, setPerformanceData] = useState(null);
-  const [ports, setPorts] = useState([]);
-  const [portsLoading, setPortsLoading] = useState(true);
-  const [processes, setProcesses] = useState([]);
-  const [processesLoading, setProcessesLoading] = useState(true);
-  const [networkInfo, setNetworkInfo] = useState(null);
-  const [networkLoading, setNetworkLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
+
+  const {
+    systemInfo,
+    performanceData,
+    ports,
+    processes,
+    networkInfo,
+    isAdmin,
+    streamStatus,
+    reconnectAttempt,
+    streamError,
+    stale,
+    lastHeartbeat,
+    refreshProcesses,
+    refreshPorts
+  } = useDashboardStream();
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-
-    const fetchSystemInfo = async () => {
-      try {
-        const response = await fetch('/api/system/info');
-        const data = await response.json();
-        setSystemInfo(data);
-      } catch (error) {
-        console.error('Failed to fetch system info:', error);
-      }
-    };
-
-    fetchSystemInfo();
-
     return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    const fetchPerformance = async () => {
-      try {
-        const response = await fetch('/api/system/performance');
-        const data = await response.json();
-        setPerformanceData(data);
-      } catch (error) {
-        console.error('Failed to fetch performance data:', error);
-      }
-    };
-
-    fetchPerformance();
-    const interval = setInterval(fetchPerformance, 4000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const fetchPorts = async () => {
-      try {
-        const response = await fetch('/api/ports');
-        const data = await response.json();
-        setPorts(data);
-      } catch (error) {
-        console.error('Failed to fetch ports:', error);
-      } finally {
-        setPortsLoading(false);
-      }
-    };
-
-    fetchPorts();
-    const interval = setInterval(fetchPorts, 12000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const fetchProcesses = async () => {
-      try {
-        const response = await fetch('/api/processes');
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        const data = await response.json();
-        setProcesses(data);
-      } catch (error) {
-        console.error('Failed to fetch processes:', error);
-      } finally {
-        setProcessesLoading(false);
-      }
-    };
-
-    fetchProcesses();
-    const interval = setInterval(fetchProcesses, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const fetchNetworkInfo = async () => {
-      try {
-        const response = await fetch('/api/network/info');
-        const data = await response.json();
-        setNetworkInfo(data);
-      } catch (error) {
-        console.error('Failed to fetch network info:', error);
-      } finally {
-        setNetworkLoading(false);
-      }
-    };
-
-    fetchNetworkInfo();
-    const interval = setInterval(fetchNetworkInfo, 20000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const fetchAdminState = async () => {
-      try {
-        const response = await fetch('/api/system/is-admin');
-        if (!response.ok) {
-          setIsAdmin(false);
-          return;
-        }
-        const data = await response.json();
-        setIsAdmin(Boolean(data.is_admin));
-      } catch {
-        setIsAdmin(false);
-      }
-    };
-
-    fetchAdminState();
   }, []);
 
   useEffect(() => {
@@ -226,13 +130,8 @@ function App() {
           <PortControl
             controlPassword={controlPassword}
             ports={ports}
-            loading={portsLoading}
-            onRefresh={async () => {
-              const response = await fetch('/api/ports');
-              const data = await response.json();
-              setPorts(data);
-              setPortsLoading(false);
-            }}
+            loading={!ports?.length && streamStatus !== 'connected'}
+            onRefresh={refreshPorts}
           />
         </div>
       );
@@ -244,13 +143,8 @@ function App() {
           <PortControl
             controlPassword={controlPassword}
             ports={ports}
-            loading={portsLoading}
-            onRefresh={async () => {
-              const response = await fetch('/api/ports');
-              const data = await response.json();
-              setPorts(data);
-              setPortsLoading(false);
-            }}
+            loading={!ports?.length && streamStatus !== 'connected'}
+            onRefresh={refreshPorts}
           />
         </div>
       );
@@ -262,17 +156,9 @@ function App() {
           <ProcessManager
             controlPassword={controlPassword}
             processes={processes}
-            loading={processesLoading}
+            loading={!processes?.length && streamStatus !== 'connected'}
             isAdmin={isAdmin}
-            onRefresh={async () => {
-              const response = await fetch('/api/processes');
-              if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-              }
-              const data = await response.json();
-              setProcesses(data);
-              setProcessesLoading(false);
-            }}
+            onRefresh={refreshProcesses}
           />
         </div>
       );
@@ -290,13 +176,7 @@ function App() {
       <div className="workspace-single">
         <NetworkHub
           networkInfo={networkInfo}
-          loading={networkLoading}
-          onRefresh={async () => {
-            const response = await fetch('/api/network/info');
-            const data = await response.json();
-            setNetworkInfo(data);
-            setNetworkLoading(false);
-          }}
+          loading={!networkInfo && streamStatus !== 'connected'}
         />
       </div>
     );
@@ -313,6 +193,17 @@ function App() {
           <div className="topbar-chip">
             <span className={`status-badge ${accessBadgeClass}`}>{accessBadgeText}</span>
           </div>
+          <div className="topbar-chip">
+            <span className={`status-badge ${streamStatus === 'connected' ? 'status-success' : 'status-warning'}`}>
+              {streamStatus === 'connected' ? 'Live Stream' : `Reconnecting (${reconnectAttempt})`}
+            </span>
+          </div>
+          <div className="topbar-chip">
+            <span className={`status-badge ${stale ? 'status-danger' : 'status-success'}`}>
+              {stale ? 'Data Stale' : 'Data Fresh'}
+            </span>
+          </div>
+          <div className="topbar-chip">{lastHeartbeat ? `Heartbeat ${new Date(lastHeartbeat).toLocaleTimeString()}` : 'Awaiting heartbeat...'}</div>
           <div className="topbar-chip">{formatTime(currentTime)}</div>
         </div>
       </header>
@@ -329,7 +220,7 @@ function App() {
               onChange={(event) => handlePasswordChange(event.target.value)}
               placeholder="Enter startup password"
             />
-            <div className="input-hint">{passwordHint}</div>
+            <div className="input-hint">{streamError || passwordHint}</div>
           </div>
 
           <div className="toolbar-block toolbar-block-summary">
@@ -366,6 +257,14 @@ function App() {
 
       {renderContent()}
     </div>
+  );
+}
+
+function App() {
+  return (
+    <DashboardStreamProvider>
+      <AppContent />
+    </DashboardStreamProvider>
   );
 }
 

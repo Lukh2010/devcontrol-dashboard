@@ -14,7 +14,7 @@ const SystemMonitor = ({ performanceData }) => {
             </span>
             <div>
               <h2 className="panel-title">System Performance</h2>
-              <p className="panel-subtitle">Polling live CPU, memory, and disk usage.</p>
+              <p className="panel-subtitle">Waiting for live stream CPU, memory, and disk usage.</p>
             </div>
           </div>
         </div>
