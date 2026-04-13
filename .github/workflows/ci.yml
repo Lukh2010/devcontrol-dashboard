@@ -303,12 +303,6 @@ jobs:
             --format sarif \
             --output trivy-results.sarif \
             .
-        with:
-          scan-type: fs
-          scan-ref: .
-          format: sarif
-          output: trivy-results.sarif
-          severity: HIGH,CRITICAL
 
       - name: Upload Trivy SARIF
         uses: github/codeql-action/upload-sarif@v3
