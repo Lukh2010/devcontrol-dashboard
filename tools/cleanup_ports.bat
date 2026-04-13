@@ -5,11 +5,11 @@ echo ====================================
 set PID_FILE=%USERPROFILE%\.devcontrol_pids.json
 
 if not exist "%PID_FILE%" (
-    echo Kein PID-File gefunden, cleanup nicht noetig
+    echo No PID file found, cleanup not needed
     exit /b 0
 )
 
-echo Stoppe Dashboard-Prozesse...
+echo Stopping dashboard processes...
 python -c "
 import json, os, subprocess
 with open(r'%PID_FILE%') as f:
@@ -17,12 +17,12 @@ with open(r'%PID_FILE%') as f:
 for group in pids.values():
     for pid in group:
         try:
-            subprocess.run(['taskkill', '/F', '/PID', str(pid)], 
+            subprocess.run(['taskkill', '/F', '/PID', str(pid)],
                          capture_output=True)
-            print(f'Gestoppt: PID {pid}')
+            print(f'Stopped: PID {pid}')
         except Exception as e:
-            print(f'Fehler bei PID {pid}: {e}')
+            print(f'Error while stopping PID {pid}: {e}')
 "
 
 del "%PID_FILE%"
-echo Cleanup abgeschlossen
+echo Cleanup completed

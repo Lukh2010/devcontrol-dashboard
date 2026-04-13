@@ -19,6 +19,7 @@ function AppContent() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [activePanel, setActivePanel] = useState('overview');
   const [controlPassword, setControlPassword] = useState(() => sessionStorage.getItem('devcontrol-password') || '');
+  const [passwordProtectionEnabled, setPasswordProtectionEnabled] = useState(true);
   const [authState, setAuthState] = useState(controlPassword ? 'checking' : 'idle');
 
   const {
@@ -43,6 +44,41 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const loadAuthStatus = async () => {
+      try {
+        const response = await fetch('/api/auth/status');
+        const data = await response.json();
+        if (!cancelled) {
+          const enabled = Boolean(data.enabled);
+          setPasswordProtectionEnabled(enabled);
+          if (!enabled) {
+            setAuthState('disabled');
+            setControlPassword('');
+            sessionStorage.removeItem('devcontrol-password');
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setPasswordProtectionEnabled(true);
+        }
+      }
+    };
+
+    loadAuthStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!passwordProtectionEnabled) {
+      setAuthState('disabled');
+      return undefined;
+    }
+
     if (!controlPassword) {
       setAuthState('idle');
       return undefined;
@@ -76,7 +112,7 @@ function AppContent() {
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [controlPassword]);
+  }, [controlPassword, passwordProtectionEnabled]);
 
   const handlePasswordChange = (value) => {
     setControlPassword(value);
@@ -94,7 +130,9 @@ function AppContent() {
     hour12: true
   });
 
-  const accessBadgeClass = authState === 'valid'
+  const accessBadgeClass = authState === 'disabled'
+    ? 'status-warning'
+    : authState === 'valid'
     ? 'status-success'
     : authState === 'checking'
       ? 'status-warning'
@@ -102,7 +140,9 @@ function AppContent() {
         ? 'status-danger'
         : 'status-warning';
 
-  const accessBadgeText = authState === 'valid'
+  const accessBadgeText = authState === 'disabled'
+    ? 'No Password'
+    : authState === 'valid'
     ? 'Unlocked'
     : authState === 'checking'
       ? 'Checking'
@@ -112,7 +152,9 @@ function AppContent() {
           ? 'Offline'
           : 'Locked';
 
-  const passwordHint = authState === 'valid'
+  const passwordHint = authState === 'disabled'
+    ? 'Password protection is disabled for this session.'
+    : authState === 'valid'
     ? 'Password verified.'
     : authState === 'checking'
       ? 'Verifying password.'
@@ -210,18 +252,20 @@ function AppContent() {
 
       <section className="toolbar-panel panel">
         <div className="toolbar-row">
-          <div className="toolbar-block">
-            <label className="field-label" htmlFor="control-password">Control Password</label>
-            <input
-              id="control-password"
-              className="input compact-input"
-              type="password"
-              value={controlPassword}
-              onChange={(event) => handlePasswordChange(event.target.value)}
-              placeholder="Enter startup password"
-            />
-            <div className="input-hint">{streamError || passwordHint}</div>
-          </div>
+          {passwordProtectionEnabled ? (
+            <div className="toolbar-block">
+              <label className="field-label" htmlFor="control-password">Control Password</label>
+              <input
+                id="control-password"
+                className="input compact-input"
+                type="password"
+                value={controlPassword}
+                onChange={(event) => handlePasswordChange(event.target.value)}
+                placeholder="Enter startup password"
+              />
+              <div className="input-hint">{streamError || passwordHint}</div>
+            </div>
+          ) : null}
 
           <div className="toolbar-block toolbar-block-summary">
             <div className="summary-card">

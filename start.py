@@ -435,21 +435,32 @@ def main():
     if existing_password:
         print("[OK] Using DEVCONTROL_PASSWORD from environment")
     else:
-        print("[SECURITY] Set a control password for remote actions and terminal access.")
+        print("[SECURITY] Password protection for terminal and protected actions is optional.")
         while True:
-            password = input("Enter control password (min. 8 chars): ").strip()
-            if len(password) < 8:
-                print("[ERROR] Password must be at least 8 characters long")
-                continue
+            use_password = input("Use control password? (y/n): ").strip().lower()
+            if use_password in ("y", "yes"):
+                while True:
+                    password = input("Enter control password (min. 8 chars): ").strip()
+                    if len(password) < 8:
+                        print("[ERROR] Password must be at least 8 characters long")
+                        continue
 
-            confirm_password = input("Confirm control password: ").strip()
-            if password != confirm_password:
-                print("[ERROR] Passwords do not match")
-                continue
+                    confirm_password = input("Confirm control password: ").strip()
+                    if password != confirm_password:
+                        print("[ERROR] Passwords do not match")
+                        continue
 
-            os.environ["DEVCONTROL_PASSWORD"] = password
-            print("[OK] Control password configured")
-            break
+                    os.environ["DEVCONTROL_PASSWORD"] = password
+                    print("[OK] Control password configured")
+                    break
+                break
+
+            if use_password in ("n", "no"):
+                os.environ.pop("DEVCONTROL_PASSWORD", None)
+                print("[WARN] Password protection disabled")
+                break
+
+            print("[ERROR] Please answer with y or n")
     
     # Create and run starter
     starter = DevControlStarter()

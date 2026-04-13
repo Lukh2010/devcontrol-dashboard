@@ -126,6 +126,20 @@ Current limitations:
 
 Use this project only on a trusted local network. Do not expose it to the public internet.
 
+## Backend Architecture
+
+The backend now runs as a service-oriented monolith. It is still one deployable Python process, but the responsibilities are split into internal services with an event-bus boundary between producers and stream consumers.
+
+Services:
+
+- API service: Flask routes and frontend-facing HTTP contract
+- telemetry collector: periodic host, process, port, and network snapshots
+- terminal gateway: WebSocket terminal authentication and session routing
+- action executor: protected command, process-kill, and port-kill operations
+- stream processor: consumes the internal event bus and fans out SSE events
+
+This is the first step toward a true distributed backend. The current split makes it easier to later replace the in-memory bus with Redis/NATS/RabbitMQ and move services into separate processes.
+
 ## Project Structure
 
 ```text
@@ -133,7 +147,16 @@ devcontrol-dashboard/
 |-- backend/
 |   |-- app.py
 |   |-- command_classifier.py
+|   |-- dashboard_pids.py
+|   |-- event_bus.py
 |   |-- requirements.txt
+|   |-- security.py
+|   |-- service_runtime.py
+|   |-- services/
+|   |   |-- action_executor.py
+|   |   |-- stream_processor.py
+|   |   |-- telemetry_service.py
+|   |   `-- terminal_gateway.py
 |   `-- terminal_session.py
 |-- frontend/
 |   |-- package.json

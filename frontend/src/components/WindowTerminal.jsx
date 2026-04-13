@@ -12,22 +12,15 @@ const WindowTerminal = ({ controlPassword }) => {
   const outputEndRef = useRef(null);
   const wsRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
+  const [passwordRequired, setPasswordRequired] = useState(true);
 
   useEffect(() => {
-    if (!controlPassword) {
-      setConnected(false);
-      setOutput([{ type: 'system', text: 'Enter the control password to unlock terminal access.' }]);
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-      return undefined;
-    }
-
+    let cancelled = false;
     const connectWebSocket = () => {
       try {
         const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-        const websocket = new WebSocket(`${protocol}://${window.location.hostname}:8003?password=${encodeURIComponent(controlPassword)}`);
+        const passwordQuery = controlPassword ? `?password=${encodeURIComponent(controlPassword)}` : '';
+        const websocket = new WebSocket(`${protocol}://${window.location.hostname}:8003${passwordQuery}`);
 
         websocket.onopen = () => {
           if (reconnectTimeoutRef.current) {
@@ -48,6 +41,7 @@ const WindowTerminal = ({ controlPassword }) => {
           setConnected(false);
           wsRef.current = null;
           if (event.code === 4401) {
+            setPasswordRequired(true);
             addOutput({ type: 'error', text: 'Wrong control password. Update it above to reconnect.' });
             return;
           }
@@ -65,9 +59,47 @@ const WindowTerminal = ({ controlPassword }) => {
       }
     };
 
-    connectWebSocket();
+    const loadAuthStatus = async () => {
+      try {
+        const response = await fetch('/api/auth/status');
+        const data = await response.json();
+        if (cancelled) {
+          return;
+        }
+
+        const enabled = Boolean(data.enabled);
+        setPasswordRequired(enabled);
+
+        if (enabled && !controlPassword) {
+          setConnected(false);
+          setOutput([{ type: 'system', text: 'Enter the control password to unlock terminal access.' }]);
+          if (wsRef.current) {
+            wsRef.current.close();
+            wsRef.current = null;
+          }
+          return;
+        }
+
+        connectWebSocket();
+      } catch {
+        if (cancelled) {
+          return;
+        }
+
+        if (!controlPassword) {
+          setConnected(false);
+          setOutput([{ type: 'system', text: 'Enter the control password to unlock terminal access.' }]);
+          return;
+        }
+
+        connectWebSocket();
+      }
+    };
+
+    loadAuthStatus();
 
     return () => {
+      cancelled = true;
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
@@ -213,7 +245,11 @@ const WindowTerminal = ({ controlPassword }) => {
           </span>
           <div>
             <h2 className="panel-title">Terminal</h2>
-            <p className="panel-subtitle">Password-gated command console with WebSocket transport.</p>
+            <p className="panel-subtitle">
+              {passwordRequired
+                ? 'Password-gated command console with WebSocket transport.'
+                : 'Command console with WebSocket transport.'}
+            </p>
           </div>
         </div>
 
@@ -261,7 +297,9 @@ const WindowTerminal = ({ controlPassword }) => {
               onChange={(event) => setCurrentCommand(event.target.value)}
               onKeyDown={handleKeyDown}
               disabled={!connected}
-              placeholder={controlPassword ? (connected ? 'Type command...' : 'Connecting...') : 'Enter control password above'}
+              placeholder={passwordRequired
+                ? (controlPassword ? (connected ? 'Type command...' : 'Connecting...') : 'Enter control password above')
+                : (connected ? 'Type command...' : 'Connecting...')}
             />
           </div>
         </div>

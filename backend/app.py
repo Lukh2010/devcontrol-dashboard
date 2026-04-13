@@ -1,404 +1,43 @@
-from flask import Flask, jsonify, request, Response, stream_with_context
-from flask_cors import CORS
-import psutil
-import socket
-import subprocess
-import platform
-import time
-import asyncio
-from websockets import exceptions as websocket_exceptions
-from websockets.legacy.server import serve as websocket_serve
-import json
-import threading
-import os
-import hmac
 import queue
-from pathlib import Path
-from urllib.parse import parse_qs
-from terminal_session import TerminalSessionManager
-from events import DashboardEventPublisher, to_sse
+import time
+
+from flask import Flask, Response, jsonify, request, stream_with_context
+from flask_cors import CORS
+
+from security import (
+    get_configured_password,
+    is_password_protection_enabled,
+    require_control_password,
+    verify_control_password
+)
+from service_runtime import ServiceRuntime
+from services.stream_processor import to_sse
 
 app = Flask(__name__)
 CORS(app, origins="*")
 
-# Terminal session manager
-terminal_manager = TerminalSessionManager()
+runtime = ServiceRuntime()
+runtime.start()
 
-# Global CPU measurement cache
-cpu_cache = {}
-last_cpu_update = 0
-process_cpu_times = {}
-
-PROTECTED_ENDPOINTS_MESSAGE = "Protected action requires the launcher control password"
-PID_FILE = Path.home() / '.devcontrol_pids.json'
-websocket_thread = None
-websocket_thread_lock = threading.Lock()
-
-def get_configured_password():
-    """Return the configured control password."""
-    return os.environ.get("DEVCONTROL_PASSWORD", "").strip()
-
-def verify_control_password(password: str) -> bool:
-    """Constant-time password verification for protected actions."""
-    configured_password = get_configured_password()
-    if not configured_password or not password:
-        return False
-    return hmac.compare_digest(password, configured_password)
-
-def require_control_password():
-    """Validate the control password sent with HTTP requests."""
-    configured_password = get_configured_password()
-    if not configured_password:
-        return jsonify({
-            "error": "Control password is not configured on the server"
-        }), 503
-
-    provided_password = request.headers.get("X-DevControl-Password", "")
-    if not verify_control_password(provided_password):
-        return jsonify({"error": PROTECTED_ENDPOINTS_MESSAGE}), 401
-
-    return None
-
-def load_dashboard_pids():
-    """Load dashboard-managed PIDs from the shared PID file."""
-    if not PID_FILE.exists():
-        return {}
-
-    try:
-        with open(PID_FILE, 'r') as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-def save_dashboard_pids(pids):
-    """Persist dashboard-managed PIDs to the shared PID file."""
-    try:
-        with open(PID_FILE, 'w') as f:
-            json.dump(pids, f, indent=2)
-    except Exception as exc:
-        print(f"Warning: could not write PID file {PID_FILE}: {exc}")
-
-def register_dashboard_pid(group: str, pid: int):
-    """Register a dashboard PID in the shared PID file."""
-    try:
-        dashboard_pids = load_dashboard_pids()
-        group_pids = dashboard_pids.setdefault(group, [])
-        pid_str = str(pid)
-        if pid_str not in group_pids:
-            group_pids.append(pid_str)
-            save_dashboard_pids(dashboard_pids)
-    except Exception as exc:
-        print(f"Warning: could not register PID {pid} for {group}: {exc}")
-
-def is_dashboard_pid(pid: int) -> bool:
-    """Check whether a PID is owned by this dashboard."""
-    dashboard_pids = load_dashboard_pids()
-    pid_str = str(pid)
-    return any(pid_str in dashboard_pids.get(group, []) for group in ('backend', 'frontend', 'websocket'))
-
-def update_cpu_cache():
-    """Update global CPU measurement cache"""
-    global cpu_cache, last_cpu_update, process_cpu_times
-    import time
-    
-    current_time = time.time()
-    if current_time - last_cpu_update < 1.0:  # Update every 1 second
-        return
-    
-    try:
-        cpu_count = max(psutil.cpu_count() or 1, 1)
-        new_cache = {}
-        new_cpu_times = {}
-        elapsed = current_time - last_cpu_update if last_cpu_update else 0
-
-        for proc in psutil.process_iter(['pid']):
-            try:
-                cpu_times = proc.cpu_times()
-                total_cpu_time = float(cpu_times.user + cpu_times.system)
-                new_cpu_times[proc.pid] = total_cpu_time
-
-                previous_cpu_time = process_cpu_times.get(proc.pid)
-                if previous_cpu_time is None or elapsed <= 0:
-                    new_cache[proc.pid] = 0.0
-                    continue
-
-                cpu_delta = max(total_cpu_time - previous_cpu_time, 0.0)
-                normalized_cpu = min(max((cpu_delta / elapsed) / cpu_count * 100, 0.0), 100.0)
-                new_cache[proc.pid] = normalized_cpu
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                new_cache[proc.pid] = 0
-        
-        cpu_cache = new_cache
-        process_cpu_times = new_cpu_times
-        last_cpu_update = current_time
-    except Exception as e:
-        print(f"Error updating CPU cache: {e}")
-
-
-def collect_system_info():
-    return {
-        "platform": platform.system(),
-        "platform_release": platform.release(),
-        "platform_version": platform.version(),
-        "architecture": platform.machine(),
-        "hostname": socket.gethostname(),
-        "processor": platform.processor(),
-        "cpu_count": psutil.cpu_count(),
-        "memory_total": psutil.virtual_memory().total,
-        "memory_available": psutil.virtual_memory().available
-    }
-
-
-def collect_system_performance(interval=1):
-    cpu_percent = psutil.cpu_percent(interval=interval)
-    memory = psutil.virtual_memory()
-    disk = psutil.disk_usage('/')
-    return {
-        "cpu_percent": cpu_percent,
-        "cpu_count": psutil.cpu_count(),
-        "memory": {
-            "total": memory.total,
-            "available": memory.available,
-            "percent": memory.percent,
-            "used": memory.used,
-            "free": memory.free
-        },
-        "disk": {
-            "total": disk.total,
-            "used": disk.used,
-            "free": disk.free,
-            "percent": (disk.used / disk.total) * 100
-        },
-        "timestamp": time.time()
-    }
-
-
-def collect_processes():
-    update_cpu_cache()
-    processes = []
-    for proc in psutil.process_iter(['pid', 'name', 'memory_info', 'status']):
-        try:
-            pinfo = proc.info
-            cpu_percent = cpu_cache.get(proc.pid, 0)
-            memory_mb = pinfo['memory_info'].rss / 1024 / 1024 if pinfo['memory_info'] else 0
-            if pinfo['name'] and pinfo['name'] != 'System Idle Process':
-                processes.append({
-                    "pid": pinfo['pid'],
-                    "name": pinfo['name'] or 'Unknown',
-                    "cpu_percent": round(cpu_percent, 2),
-                    "memory_mb": round(memory_mb, 2),
-                    "status": pinfo['status']
-                })
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            continue
-    processes.sort(key=lambda x: x['cpu_percent'], reverse=True)
-    return processes[:15]
-
-
-def collect_ports():
-    connections = {}
-    for conn in psutil.net_connections():
-        if conn.status == 'LISTEN':
-            try:
-                process = psutil.Process(conn.pid) if conn.pid else None
-                if process:
-                    key = (conn.laddr.port, conn.pid, process.name())
-                    connections[key] = {
-                        "port": conn.laddr.port,
-                        "process_name": process.name(),
-                        "pid": conn.pid,
-                        "status": conn.status
-                    }
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-    deduped_connections = sorted(connections.values(), key=lambda x: (x['port'], x['pid']))
-    return deduped_connections
-
-
-def collect_network_info():
-    network_info = {}
-    for interface, addrs in psutil.net_if_addrs().items():
-        network_info[interface] = []
-        for addr in addrs:
-            if addr.family == socket.AF_INET:
-                network_info[interface].append({
-                    "family": "IPv4",
-                    "address": addr.address,
-                    "netmask": addr.netmask,
-                    "broadcast": addr.broadcast
-                })
-            elif addr.family == socket.AF_INET6:
-                network_info[interface].append({
-                    "family": "IPv6",
-                    "address": addr.address,
-                    "netmask": addr.netmask
-                })
-
-    default_gateway = "Unknown"
-    if platform.system() == "Windows":
-        try:
-            result = subprocess.run("ipconfig", capture_output=True, text=True)
-            lines = result.stdout.split('\n')
-            for line in lines:
-                if "Default Gateway" in line:
-                    gateway = line.split(":")[-1].strip()
-                    if gateway:
-                        default_gateway = gateway
-                        break
-        except Exception:
-            pass
-
-    return {
-        "interfaces": network_info,
-        "default_gateway": default_gateway,
-        "hostname": socket.gethostname()
-    }
-
-
-def collect_is_admin():
-    if platform.system() == 'Windows':
-        try:
-            import ctypes
-            return ctypes.windll.shell32.IsUserAnAdmin() != 0
-        except Exception:
-            return False
-    return os.geteuid() == 0 if hasattr(os, 'geteuid') else False
-
-
-event_publisher = DashboardEventPublisher(
-    collectors={
-        "system_snapshot": {
-            "interval": 4,
-            "collect": lambda: {
-                "system_info": collect_system_info(),
-                "performance": collect_system_performance(interval=0),
-                "is_admin": collect_is_admin()
-            }
-        },
-        "process_snapshot": {
-            "interval": 5,
-            "collect": lambda: {"processes": collect_processes()}
-        },
-        "network_snapshot": {
-            "interval": 10,
-            "collect": lambda: {
-                "ports": collect_ports(),
-                "network_info": collect_network_info()
-            }
-        }
-    }
-)
-event_publisher.start()
-register_dashboard_pid("backend", os.getpid())
-register_dashboard_pid("websocket", os.getpid())
-
-# WebSocket server
-async def handle_websocket(websocket, path):
-    """Handle WebSocket connections for terminal sessions"""
-    try:
-        query_params = parse_qs((path or '').split('?', 1)[1] if '?' in (path or '') else '')
-        provided_password = query_params.get('password', [''])[0]
-        if not verify_control_password(provided_password):
-            await websocket.send(json.dumps({
-                'type': 'error',
-                'message': PROTECTED_ENDPOINTS_MESSAGE
-            }))
-            event_publisher.publish("action", {
-                "action": "terminal_state",
-                "status": "unauthorized",
-                "reason": "invalid_password"
-            })
-            await websocket.close(code=4401, reason='Unauthorized')
-            return
-
-        session_id = await terminal_manager.create_session(websocket)
-        event_publisher.publish("action", {
-            "action": "terminal_state",
-            "status": "connected",
-            "session_id": session_id
-        })
-        
-        async for message in websocket:
-            try:
-                data = json.loads(message)
-                await terminal_manager.handle_message(session_id, data)
-            except json.JSONDecodeError:
-                await websocket.send(json.dumps({
-                    'type': 'error',
-                    'message': 'Invalid JSON message'
-                }))
-            except Exception as e:
-                await websocket.send(json.dumps({
-                    'type': 'error',
-                    'message': f'Error handling message: {str(e)}'
-                }))
-                
-    except websocket_exceptions.ConnectionClosed:
-        pass
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-    finally:
-        if 'session_id' in locals():
-            await terminal_manager.close_session(session_id)
-            event_publisher.publish("action", {
-                "action": "terminal_state",
-                "status": "disconnected",
-                "session_id": session_id
-            })
-
-def start_websocket_server():
-    """Start WebSocket server in a separate thread"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    try:
-        start_server = websocket_serve(handle_websocket, "0.0.0.0", 8003)
-        loop.run_until_complete(start_server)
-        event_publisher.publish("action", {
-            "action": "terminal_server",
-            "status": "ready",
-            "port": 8003
-        })
-        print("WebSocket terminal server started on ws://localhost:8003")
-        loop.run_forever()
-    except OSError as e:
-        message = str(e)
-        event_publisher.publish("action", {
-            "action": "terminal_server",
-            "status": "unavailable",
-            "port": 8003,
-            "reason": message
-        })
-        if "address already in use" in message.lower() or "10048" in message:
-            print(f"WebSocket port 8003 is unavailable: {message}")
-        else:
-            raise e
-
-def start_websocket_server_thread():
-    """Start the terminal WebSocket thread once for this backend process."""
-    global websocket_thread
-    with websocket_thread_lock:
-        if websocket_thread and websocket_thread.is_alive():
-            return
-        websocket_thread = threading.Thread(target=start_websocket_server, daemon=True)
-        websocket_thread.start()
-        print("WebSocket server thread started")
-
-# Start WebSocket server with delay to avoid conflicts
-timer = threading.Timer(2.0, start_websocket_server_thread)
-timer.start()
 
 @app.route("/")
 def root():
     return jsonify({"message": "DevControl Dashboard API"})
 
+
 @app.route("/docs")
 def api_docs():
-    """API Documentation endpoint"""
     docs = {
         "title": "DevControl Dashboard API",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "description": "REST API for DevControl Dashboard",
+        "architecture": {
+            "api_service": "Flask API facade for the frontend contract",
+            "telemetry_collector": "Periodic system/process/network collectors",
+            "terminal_gateway": "WebSocket terminal service",
+            "action_executor": "Protected command/process/port actions",
+            "stream_processor": "Internal event bus consumer and SSE fanout"
+        },
         "endpoints": {
             "/": "API Root - Returns API information",
             "/docs": "This API documentation",
@@ -415,7 +54,7 @@ def api_docs():
         },
         "examples": {
             "run_command": {
-                "url": "/api/commands/run", 
+                "url": "/api/commands/run",
                 "method": "POST",
                 "body": {"command": "dir", "name": "List Directory"}
             }
@@ -423,293 +62,111 @@ def api_docs():
     }
     return jsonify(docs)
 
+
 @app.route("/api/system/info")
 def get_system_info():
-    """Get basic system information"""
     try:
-        return jsonify(collect_system_info())
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify(runtime.telemetry.collect_system_info())
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
 
 @app.route("/api/system/performance")
 def get_system_performance():
-    """Get real-time system performance data"""
     try:
-        return jsonify(collect_system_performance())
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify(runtime.telemetry.collect_system_performance())
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
 
 @app.route("/api/processes")
 def get_processes():
-    """Get running processes with CPU and memory usage"""
     try:
-        return jsonify(collect_processes())
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify(runtime.telemetry.collect_processes())
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
 
 @app.route("/api/ports")
 def get_ports():
-    """Get all active network connections and their associated processes"""
     try:
-        return jsonify(collect_ports())
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify(runtime.telemetry.collect_ports())
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
-@app.route("/api/port/<int:port>", methods=['DELETE'])
+
+@app.route("/api/port/<int:port>", methods=["DELETE"])
 def kill_process_by_port(port):
-    """Kill process using the specified port"""
-    try:
-        auth_error = require_control_password()
-        if auth_error:
-            return auth_error
+    auth_error = require_control_password()
+    if auth_error:
+        return auth_error
 
-        for conn in psutil.net_connections():
-            if conn.status == 'LISTEN' and conn.laddr.port == port:
-                try:
-                    if not conn.pid or not is_dashboard_pid(conn.pid):
-                        event_publisher.publish("action", {
-                            "action": "kill_by_port",
-                            "status": "failed",
-                            "port": port,
-                            "reason": "not_dashboard_pid"
-                        })
-                        return jsonify({
-                            "error": f"Port {port} is not owned by a dashboard-managed process"
-                        }), 403
+    payload, status = runtime.actions.kill_process_by_port(port)
+    return jsonify(payload), status
 
-                    process = psutil.Process(conn.pid)
-                    process.terminate()
-                    event_publisher.publish("action", {
-                        "action": "kill_by_port",
-                        "status": "success",
-                        "port": port,
-                        "pid": conn.pid,
-                        "process_name": process.name()
-                    })
-                    return jsonify({"message": f"Process {process.name()} (PID: {conn.pid}) terminated successfully"})
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    event_publisher.publish("action", {
-                        "action": "kill_by_port",
-                        "status": "failed",
-                        "port": port,
-                        "reason": "access_denied_or_missing"
-                    })
-                    return jsonify({"error": f"Cannot terminate process on port {port}"}), 403
-        
-        event_publisher.publish("action", {
-            "action": "kill_by_port",
-            "status": "failed",
-            "port": port,
-            "reason": "port_not_found"
-        })
-        return jsonify({"error": f"No process found using port {port}"}), 404
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
-@app.route("/api/commands/run", methods=['POST'])
+@app.route("/api/commands/run", methods=["POST"])
 def run_command():
-    """Execute a custom command"""
-    try:
-        auth_error = require_control_password()
-        if auth_error:
-            return auth_error
+    auth_error = require_control_password()
+    if auth_error:
+        return auth_error
 
-        data = request.get_json(silent=True) or {}
-        command = data.get('command', '')
-        name = data.get('name', '')
-        if not isinstance(command, str) or not command.strip():
-            return jsonify({"error": "Request JSON must include a non-empty string 'command'"}), 400
-        if name and not isinstance(name, str):
-            return jsonify({"error": "Optional field 'name' must be a string"}), 400
-        
-        # Security: Prevent dangerous commands
-        dangerous_commands = ['rm -rf', 'format', 'del /f', 'shutdown', 'reboot']
-        if any(dangerous in command.lower() for dangerous in dangerous_commands):
-            return jsonify({"error": "Dangerous command detected"}), 400
-        
-        import shlex
-        
-        # Execute command safely
-        if platform.system() == 'Windows':
-            # On Windows, use shell=True for built-in commands but validate input
-            if any(cmd in command.lower() for cmd in ['del', 'rmdir', 'format', 'shutdown']):
-                return jsonify({"error": "Dangerous command blocked for security"}), 403
-            
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-        else:
-            # On Unix-like systems, avoid shell=True
-            try:
-                args = shlex.split(command)
-                result = subprocess.run(
-                    args,
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-            except ValueError:
-                # Fallback for complex commands
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-        
-        return jsonify({
-            "command": command,
-            "name": name,
-            "return_code": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "success": result.returncode == 0
-        })
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "Command execution timed out"}), 408
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    data = request.get_json(silent=True) or {}
+    payload, status = runtime.actions.run_command(
+        command=data.get("command", ""),
+        name=data.get("name", "")
+    )
+    return jsonify(payload), status
+
 
 @app.route("/api/network/info")
 def get_network_info():
-    """Get network interface information"""
     try:
-        return jsonify(collect_network_info())
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify(runtime.telemetry.collect_network_info())
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
 
 @app.route("/api/processes/<int:pid>/kill", methods=["POST"])
 def kill_process(pid):
-    """Kill a specific process (admin only)"""
-    try:
-        auth_error = require_control_password()
-        if auth_error:
-            return auth_error
+    auth_error = require_control_password()
+    if auth_error:
+        return auth_error
 
-        # Check admin privileges on Windows
-        if platform.system() == 'Windows':
-            try:
-                import ctypes
-                is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
-                if not is_admin:
-                    return jsonify({
-                        "error": "Administrator privileges required",
-                        "message": "Please run the dashboard as Administrator"
-                    }), 403
-            except:
-                return jsonify({
-                    "error": "Could not verify admin privileges",
-                    "message": "Please run the dashboard as Administrator"
-                }), 403
-        
-        # Get process info before killing
-        try:
-            process = psutil.Process(pid)
-            process_name = process.name()
-        except psutil.NoSuchProcess:
-            return jsonify({"error": f"Process {pid} not found"}), 404
-        
-        if not is_dashboard_pid(pid):
-            event_publisher.publish("action", {
-                "action": "kill_process",
-                "status": "failed",
-                "pid": pid,
-                "reason": "not_dashboard_pid",
-                "name": process_name
-            })
-            return jsonify({
-                "error": "Can only kill dashboard processes",
-                "message": f"Process {pid} ({process_name}) is not a dashboard process"
-            }), 403
-        
-        # Kill the process
-        process.terminate()
-        
-        # Wait a bit and force kill if still running
-        try:
-            process.wait(timeout=3)
-        except psutil.TimeoutExpired:
-            process.kill()
-        event_publisher.publish("action", {
-            "action": "kill_process",
-            "status": "success",
-            "pid": pid,
-            "name": process_name
-        })
-        
-        return jsonify({
-            "success": True,
-            "message": f"Process {pid} ({process_name}) killed successfully",
-            "pid": pid,
-            "name": process_name
-        })
-        
-    except psutil.NoSuchProcess:
-        event_publisher.publish("action", {
-            "action": "kill_process",
-            "status": "failed",
-            "pid": pid,
-            "reason": "process_not_found"
-        })
-        return jsonify({"error": f"Process {pid} not found"}), 404
-    except psutil.AccessDenied:
-        event_publisher.publish("action", {
-            "action": "kill_process",
-            "status": "failed",
-            "pid": pid,
-            "reason": "access_denied"
-        })
-        return jsonify({"error": f"Access denied to process {pid}"}), 403
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    payload, status = runtime.actions.kill_process(
+        pid=pid,
+        is_admin=runtime.telemetry.collect_is_admin()
+    )
+    return jsonify(payload), status
+
 
 @app.route("/api/system/is-admin")
 def is_admin():
-    """Check if current user has administrator privileges"""
     try:
         return jsonify({
-            "is_admin": collect_is_admin(),
-            "platform": platform.system()
+            "is_admin": runtime.telemetry.collect_is_admin(),
+            "platform": runtime.telemetry.collect_system_info()["platform"]
         })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/api/events/stream")
 def stream_events():
-    """SSE stream for dashboard snapshots, heartbeat, and action events."""
-    subscriber_id, subscriber_queue = event_publisher.subscribe()
+    subscriber_id, subscriber_queue = runtime.stream_processor.subscribe()
 
     def generate():
         try:
             bootstrap_collectors = [
-                ("system_snapshot", lambda: {
-                    "system_info": collect_system_info(),
-                    "performance": collect_system_performance(interval=0),
-                    "is_admin": collect_is_admin(),
-                    "timestamp": time.time()
-                }),
-                ("process_snapshot", lambda: {
-                    "processes": collect_processes(),
-                    "timestamp": time.time()
-                }),
-                ("network_snapshot", lambda: {
-                    "ports": collect_ports(),
-                    "network_info": collect_network_info(),
-                    "timestamp": time.time()
-                }),
+                ("system_snapshot", runtime.telemetry.collect_system_snapshot),
+                ("process_snapshot", runtime.telemetry.collect_process_snapshot),
+                ("network_snapshot", runtime.telemetry.collect_network_snapshot),
             ]
             for event_type, collect_payload in bootstrap_collectors:
                 try:
-                    yield to_sse({
-                        "type": event_type,
-                        "payload": collect_payload()
-                    })
+                    payload = collect_payload()
+                    payload["timestamp"] = time.time()
+                    yield to_sse({"type": event_type, "payload": payload})
                 except Exception as bootstrap_error:
                     yield to_sse({
                         "type": "action",
@@ -729,33 +186,47 @@ def stream_events():
                 except queue.Empty:
                     yield "event: heartbeat\ndata: {}\n\n"
         finally:
-            event_publisher.unsubscribe(subscriber_id)
+            runtime.stream_processor.unsubscribe(subscriber_id)
+
     response = Response(stream_with_context(generate()), mimetype="text/event-stream")
     response.headers["Cache-Control"] = "no-cache"
     response.headers["X-Accel-Buffering"] = "no"
     return response
 
+
 @app.route("/api/auth/validate", methods=["POST"])
 def validate_control_password():
-    """Validate the provided control password without performing any action."""
     try:
-        configured_password = get_configured_password()
-        if not configured_password:
+        if not is_password_protection_enabled():
             return jsonify({
-                "valid": False,
+                "valid": True,
                 "configured": False,
-                "error": "Control password is not configured on the server"
-            }), 503
+                "required": False
+            })
 
         data = request.get_json(silent=True) or {}
         provided_password = data.get("password", "")
 
         return jsonify({
             "valid": verify_control_password(provided_password),
-            "configured": True
+            "configured": True,
+            "required": True
         })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/auth/status")
+def auth_status():
+    try:
+        enabled = is_password_protection_enabled()
+        return jsonify({
+            "enabled": enabled,
+            "required": enabled
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=False)
