@@ -106,6 +106,8 @@ dist
 # Gatsby files
 .cache/
 public
+!frontend/public/
+!frontend/public/mockServiceWorker.js
 
 # Storybook build outputs
 .out
@@ -154,7 +156,6 @@ instance/
 htmlcov/
 backend/tests/test_api_contract.py
 frontend/test-results/
-frontend/tests/
 frontend/playwright-report/
 frontend/blob-report/
 frontend/.playwright/
@@ -204,5 +205,3 @@ AllComponents_*.jsx
 LiveTerminal.jsx
 
 .windsurfrules
-frontend/src/test/unit/App.test.jsx
-frontend/src/test/unit/schemas.test.jsx
