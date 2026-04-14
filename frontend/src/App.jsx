@@ -21,7 +21,7 @@ const PANELS = [
 function AppContent() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [activePanel, setActivePanel] = useState('overview');
-  const [controlPassword, setControlPassword] = useState(() => sessionStorage.getItem('devcontrol-password') || '');
+  const [controlPassword, setControlPassword] = useState('');
 
   const {
     systemInfo,
@@ -75,18 +75,59 @@ function AppContent() {
   useEffect(() => {
     if (!passwordProtectionEnabled) {
       setControlPassword('');
-      sessionStorage.removeItem('devcontrol-password');
     }
   }, [passwordProtectionEnabled]);
 
   const handlePasswordChange = (value) => {
     setControlPassword(value);
-    if (value) {
-      sessionStorage.setItem('devcontrol-password', value);
-    } else {
-      sessionStorage.removeItem('devcontrol-password');
-    }
   };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncSession = async () => {
+      if (!passwordProtectionEnabled || !controlPassword) {
+        await fetch('/api/auth/session', {
+          method: 'DELETE',
+          credentials: 'same-origin'
+        }).catch(() => {});
+        return;
+      }
+
+      if (!passwordValidationQuery.data?.valid) {
+        await fetch('/api/auth/session', {
+          method: 'DELETE',
+          credentials: 'same-origin'
+        }).catch(() => {});
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/auth/session', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify({ password: controlPassword })
+        });
+
+        if (!response.ok && !cancelled) {
+          setControlPassword('');
+        }
+      } catch {
+        if (!cancelled) {
+          setControlPassword('');
+        }
+      }
+    };
+
+    void syncSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [controlPassword, passwordProtectionEnabled, passwordValidationQuery.data?.valid]);
 
   const formatTime = (date) => date.toLocaleTimeString('en-US', {
     hour: '2-digit',

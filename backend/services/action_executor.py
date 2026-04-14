@@ -1,9 +1,12 @@
 import platform
 import shlex
 import subprocess
+import time
 
 import psutil
+from flask import has_request_context, request
 
+from command_classifier import CommandClassifier
 from dashboard_pids import is_dashboard_pid
 
 
@@ -12,6 +15,7 @@ class ActionExecutorService:
 
     def __init__(self, event_bus):
         self.event_bus = event_bus
+        self.classifier = CommandClassifier()
 
     def kill_process_by_port(self, port: int):
         for conn in psutil.net_connections():
@@ -44,22 +48,36 @@ class ActionExecutorService:
 
     def run_command(self, command: str, name: str = ""):
         if not isinstance(command, str) or not command.strip():
+            self._publish_audit(command, "invalid", None)
             return {"error": "Request JSON must include a non-empty string 'command'"}, 400
         if name and not isinstance(name, str):
+            self._publish_audit(command, "invalid", None)
             return {"error": "Optional field 'name' must be a string"}, 400
 
-        dangerous_commands = ["rm -rf", "format", "del /f", "shutdown", "reboot"]
-        if any(dangerous in command.lower() for dangerous in dangerous_commands):
+        classification, reason = self.classifier.classify_command(command)
+
+        if classification == "dangerous":
+            self._publish_action("run_command", "failed", command=command, name=name, reason="dangerous_command")
+            self._publish_audit(command, classification, None)
             return {"error": "Dangerous command detected"}, 400
+
+        if classification == "interactive":
+            self._publish_action("run_command", "failed", command=command, name=name, reason="interactive_command")
+            self._publish_audit(command, classification, None)
+            return {"error": "Interactive commands are not supported by this endpoint"}, 400
+
+        if classification == "unknown" and not self._is_confirmed_request():
+            self._publish_action("run_command", "failed", command=command, name=name, reason="confirmation_required")
+            self._publish_audit(command, classification, None)
+            return {
+                "error": "Unknown command requires explicit confirmation via ?confirm=true or X-Confirm: true"
+            }, 400
 
         try:
             if platform.system() == "Windows":
-                if any(cmd in command.lower() for cmd in ["del", "rmdir", "format", "shutdown"]):
-                    return {"error": "Dangerous command blocked for security"}, 403
-
+                args = ["cmd.exe", "/C", *shlex.split(command, posix=False)]
                 result = subprocess.run(
-                    command,
-                    shell=True,
+                    args,
                     capture_output=True,
                     text=True,
                     timeout=30,
@@ -86,9 +104,15 @@ class ActionExecutorService:
                     )
         except subprocess.TimeoutExpired:
             self._publish_action("run_command", "failed", command=command, name=name, reason="timeout")
+            self._publish_audit(command, classification, None)
             return {"error": "Command execution timed out"}, 408
+        except ValueError as exc:
+            self._publish_action("run_command", "failed", command=command, name=name, reason="parse_error")
+            self._publish_audit(command, classification, None)
+            return {"error": str(exc)}, 400
         except Exception as exc:
             self._publish_action("run_command", "failed", command=command, name=name, reason=str(exc))
+            self._publish_audit(command, classification, None)
             return {"error": str(exc)}, 500
 
         payload = {
@@ -104,8 +128,10 @@ class ActionExecutorService:
             "success" if result.returncode == 0 else "failed",
             command=command,
             name=name,
+            classification=classification,
             return_code=result.returncode
         )
+        self._publish_audit(command, classification, result.returncode)
         return payload, 200
 
     def kill_process(self, pid: int, is_admin: bool):
@@ -154,4 +180,22 @@ class ActionExecutorService:
             "action": action,
             "status": status,
             **details
+        })
+
+    def _is_confirmed_request(self) -> bool:
+        if not has_request_context():
+            return False
+
+        confirm_query = request.args.get("confirm", "")
+        confirm_header = request.headers.get("X-Confirm", "")
+        return str(confirm_query).lower() == "true" or str(confirm_header).lower() == "true"
+
+    def _publish_audit(self, command, classification, return_code):
+        caller_ip = request.remote_addr if has_request_context() else None
+        self.event_bus.publish("audit", {
+            "timestamp": time.time(),
+            "command": command,
+            "classification": classification,
+            "return_code": return_code,
+            "caller_ip": caller_ip
         })

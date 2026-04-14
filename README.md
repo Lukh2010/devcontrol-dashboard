@@ -70,6 +70,22 @@ chmod +x tools/start_linux.sh
 
 The Linux launcher also asks whether password protection should be enabled before startup.
 
+### Root Starter Commands
+
+The root helper now exposes explicit subcommands:
+
+```bash
+python start.py install
+python start.py run
+python start.py stop
+```
+
+`install` checks dependencies and installs backend/frontend packages.
+
+`run` performs install checks, prompts for the optional control password, cleans up only dashboard-owned processes, then starts backend and frontend.
+
+`stop` terminates only dashboard-owned registered processes.
+
 ### Manual Start
 
 Backend:
@@ -118,15 +134,15 @@ Protected endpoints:
 Current safeguards:
 
 - optional password gate for sensitive actions
+- server-side auth session cookie for protected HTTP actions
 - dashboard-owned PID restriction for process and port termination
-- command classification and dangerous-command filtering
+- command classification with dangerous-command blocking and explicit confirmation for unknown commands
+- localhost-only backend and terminal binding
 - admin check for process termination on Windows
 
 Current limitations:
 
-- backend binds to `0.0.0.0`
-- Windows command execution still uses `shell=True` in some paths
-- there is no multi-user auth or session model
+- terminal WebSocket still uses a single local-session model, not multi-user auth
 - there are no rate limits
 - terminal mode is subprocess-based, not a full PTY shell
 
@@ -209,6 +225,12 @@ Build:
 npm run build
 ```
 
+Lint:
+
+```bash
+npm run lint
+```
+
 Unit tests:
 
 ```bash
@@ -256,6 +278,8 @@ Useful API endpoints:
 - `GET /api/network/info`
 - `GET /api/auth/status`
 - `POST /api/auth/validate`
+- `POST /api/auth/session`
+- `DELETE /api/auth/session`
 - `GET /api/events/stream`
 
 ## CI
@@ -263,7 +287,9 @@ Useful API endpoints:
 The GitHub Actions workflow runs:
 
 - backend syntax checks
+- backend pytest
 - backend live API smoke tests
+- frontend ESLint
 - frontend production build
 - Vitest
 - Playwright
@@ -298,7 +324,7 @@ Generated folders like `frontend/dist`, `frontend/test-results`, and Playwright 
 
 ### Protected actions return `401`
 
-The frontend password does not match the backend `DEVCONTROL_PASSWORD`.
+The frontend password does not match the backend `DEVCONTROL_PASSWORD`, or the HTTP auth session cookie is missing/expired.
 
 ### Process controls do not work on Windows
 
@@ -311,6 +337,7 @@ Check:
 - backend is running
 - port `8003` is free
 - the password matches if protection is enabled
+- the current browser session has a valid control session cookie
 
 ## Roadmap Direction
 

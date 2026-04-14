@@ -102,7 +102,13 @@ export function DashboardStreamProvider({ children }) {
       });
 
       source.addEventListener('system_snapshot', (event) => {
-        const payload = streamSystemSnapshotSchema.parse(JSON.parse(event.data || '{}'));
+        let payload;
+        try {
+          payload = streamSystemSnapshotSchema.parse(JSON.parse(event.data || '{}'));
+        } catch {
+          setState((prev) => ({ ...prev, streamError: 'Malformed event: system_snapshot' }));
+          return;
+        }
         if (payload.system_info) {
           queryClient.setQueryData(dashboardQueryKeys.systemInfo, payload.system_info);
         }
@@ -119,7 +125,13 @@ export function DashboardStreamProvider({ children }) {
       });
 
       source.addEventListener('process_snapshot', (event) => {
-        const payload = streamProcessSnapshotSchema.parse(JSON.parse(event.data || '{}'));
+        let payload;
+        try {
+          payload = streamProcessSnapshotSchema.parse(JSON.parse(event.data || '{}'));
+        } catch {
+          setState((prev) => ({ ...prev, streamError: 'Malformed event: process_snapshot' }));
+          return;
+        }
         if (payload.processes) {
           queryClient.setQueryData(dashboardQueryKeys.processes, payload.processes);
         }
@@ -131,7 +143,13 @@ export function DashboardStreamProvider({ children }) {
       });
 
       source.addEventListener('network_snapshot', (event) => {
-        const payload = streamNetworkSnapshotSchema.parse(JSON.parse(event.data || '{}'));
+        let payload;
+        try {
+          payload = streamNetworkSnapshotSchema.parse(JSON.parse(event.data || '{}'));
+        } catch {
+          setState((prev) => ({ ...prev, streamError: 'Malformed event: network_snapshot' }));
+          return;
+        }
         if (payload.ports) {
           queryClient.setQueryData(dashboardQueryKeys.ports, payload.ports);
         }
@@ -147,7 +165,13 @@ export function DashboardStreamProvider({ children }) {
       });
 
       source.addEventListener('action', (event) => {
-        const payload = actionEventSchema.parse(JSON.parse(event.data || '{}'));
+        let payload;
+        try {
+          payload = actionEventSchema.parse(JSON.parse(event.data || '{}'));
+        } catch {
+          setState((prev) => ({ ...prev, streamError: 'Malformed event: action' }));
+          return;
+        }
         setState((prev) => ({
           ...prev,
           lastAction: payload,

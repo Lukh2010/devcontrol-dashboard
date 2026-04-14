@@ -1,21 +1,26 @@
 import asyncio
+from http.cookies import SimpleCookie
 import json
 import os
 import threading
-from urllib.parse import parse_qs
 
 from websockets import exceptions as websocket_exceptions
 from websockets.legacy.server import serve as websocket_serve
 
 from dashboard_pids import register_dashboard_pid
-from security import PROTECTED_ENDPOINTS_MESSAGE, verify_control_password
+from security import (
+    PROTECTED_ENDPOINTS_MESSAGE,
+    SESSION_COOKIE_NAME,
+    has_valid_control_session,
+    verify_control_password
+)
 from terminal_session import TerminalSessionManager
 
 
 class TerminalGatewayService:
     """Owns terminal websocket lifecycle and session routing."""
 
-    def __init__(self, event_bus, host: str = "0.0.0.0", port: int = 8003):
+    def __init__(self, event_bus, host: str = "127.0.0.1", port: int = 8003):
         self.event_bus = event_bus
         self.host = host
         self.port = port
@@ -25,12 +30,20 @@ class TerminalGatewayService:
 
     async def handle_websocket(self, websocket, path):
         try:
-            query_params = parse_qs((path or "").split("?", 1)[1] if "?" in (path or "") else "")
-            provided_password = query_params.get("password", [""])[0]
-            if not verify_control_password(provided_password):
+            cookie_header = websocket.request_headers.get("Cookie", "")
+            cookies = SimpleCookie()
+            if cookie_header:
+                cookies.load(cookie_header)
+
+            session_cookie = cookies.get(SESSION_COOKIE_NAME)
+            session_token = session_cookie.value if session_cookie else ""
+            provided_password = websocket.request_headers.get("X-DevControl-Password", "")
+
+            if not has_valid_control_session(session_token) and not verify_control_password(provided_password):
                 await websocket.send(json.dumps({
                     "type": "error",
-                    "message": PROTECTED_ENDPOINTS_MESSAGE
+                    "message": PROTECTED_ENDPOINTS_MESSAGE,
+                    "reason": "unauthorized"
                 }))
                 self._publish_terminal_state("unauthorized", reason="invalid_password")
                 await websocket.close(code=4401, reason="Unauthorized")

@@ -152,6 +152,7 @@ instance/
 # Testing
 .coverage
 .pytest_cache/
+backend/pytest-cache-files-*/
 .tox/
 htmlcov/
 backend/tests/test_api_contract.py
@@ -183,6 +184,7 @@ fix_*.ps1
 !LICENSE
 !docs/
 !docs/*.md
+AI Info.md
 
 # HTML files
 *.html
@@ -205,3 +207,4 @@ AllComponents_*.jsx
 LiveTerminal.jsx
 
 .windsurfrules
+info.txt

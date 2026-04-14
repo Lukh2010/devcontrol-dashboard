@@ -242,7 +242,9 @@ class TerminalSession:
                             'type': 'warning',
                             'message': '⚠️ Could not verify admin privileges, trying command anyway...'
                         })
-                process = await asyncio.create_subprocess_shell(
+                process = await asyncio.create_subprocess_exec(
+                    "cmd.exe",
+                    "/C",
                     command,
                     cwd=self.working_dir,
                     stdout=asyncio.subprocess.PIPE,

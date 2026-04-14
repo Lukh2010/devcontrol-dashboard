@@ -15,22 +15,22 @@ const WindowTerminal = ({ controlPassword }) => {
   const outputEndRef = useRef(null);
   const wsRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
+  const unauthorizedRef = useRef(false);
   const authStatusQuery = useAuthStatus();
   const passwordRequired = authStatusQuery.data?.enabled ?? true;
 
   useEffect(() => {
-    let cancelled = false;
     const connectWebSocket = () => {
       try {
         const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-        const passwordQuery = controlPassword ? `?password=${encodeURIComponent(controlPassword)}` : '';
-        const websocket = new WebSocket(`${protocol}://${window.location.hostname}:8003${passwordQuery}`);
+        const websocket = new WebSocket(`${protocol}://${window.location.hostname}:8003`);
 
         websocket.onopen = () => {
           if (reconnectTimeoutRef.current) {
             clearTimeout(reconnectTimeoutRef.current);
             reconnectTimeoutRef.current = null;
           }
+          unauthorizedRef.current = false;
           setConnected(true);
           wsRef.current = websocket;
           addOutput({ type: 'system', text: 'Connected to terminal server' });
@@ -45,7 +45,9 @@ const WindowTerminal = ({ controlPassword }) => {
           setConnected(false);
           wsRef.current = null;
           if (event.code === 4401) {
-            addOutput({ type: 'error', text: 'Wrong control password. Update it above to reconnect.' });
+            if (!unauthorizedRef.current) {
+              addOutput({ type: 'error', text: 'Wrong control password. Update it above to reconnect.' });
+            }
             return;
           }
           reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
@@ -62,20 +64,9 @@ const WindowTerminal = ({ controlPassword }) => {
       }
     };
 
-    if (passwordRequired && !controlPassword) {
-      setConnected(false);
-      setOutput([{ type: 'system', text: 'Enter the control password to unlock terminal access.' }]);
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-      return undefined;
-    }
-
     connectWebSocket();
 
     return () => {
-      cancelled = true;
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
@@ -122,6 +113,11 @@ const WindowTerminal = ({ controlPassword }) => {
         addOutput({ type: 'warning', text: message.message });
         break;
       case 'error':
+        if (message.reason === 'unauthorized') {
+          unauthorizedRef.current = true;
+          addOutput({ type: 'error', text: 'Wrong control password. Update it above to reconnect.' });
+          break;
+        }
         addOutput({ type: 'error', text: message.message });
         break;
       default:
@@ -279,7 +275,7 @@ const WindowTerminal = ({ controlPassword }) => {
               onKeyDown={handleKeyDown}
               disabled={!connected}
               placeholder={passwordRequired
-                ? (controlPassword ? (connected ? 'Type command...' : 'Connecting...') : 'Enter control password above')
+                ? (connected ? 'Type command...' : 'Connecting...')
                 : (connected ? 'Type command...' : 'Connecting...')}
             />
           </div>

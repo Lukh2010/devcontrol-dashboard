@@ -55,14 +55,9 @@ jobs:
       - name: Static syntax check
         run: python -m compileall backend
 
-      - name: Run backend pytest suite if present
+      - name: Run backend pytest suite
         working-directory: backend
-        run: |
-          if find . -maxdepth 2 \( -name "test_*.py" -o -name "*_test.py" \) | grep -q .; then
-            pytest -q
-          else
-            echo "No backend pytest files found; relying on smoke checks."
-          fi
+        run: pytest -q
 
       - name: Start backend
         working-directory: backend
@@ -212,6 +207,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+
+      - name: Run ESLint
+        working-directory: frontend
+        run: npm run lint
 
       - name: Build frontend
         working-directory: frontend
