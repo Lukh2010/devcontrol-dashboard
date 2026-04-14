@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Copy, Square, Terminal } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
@@ -18,63 +18,9 @@ const WindowTerminal = ({ controlPassword }) => {
   const unauthorizedRef = useRef(false);
   const authStatusQuery = useAuthStatus();
   const passwordRequired = authStatusQuery.data?.enabled ?? true;
-
-  useEffect(() => {
-    const connectWebSocket = () => {
-      try {
-        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-        const websocket = new WebSocket(`${protocol}://${window.location.hostname}:8003`);
-
-        websocket.onopen = () => {
-          if (reconnectTimeoutRef.current) {
-            clearTimeout(reconnectTimeoutRef.current);
-            reconnectTimeoutRef.current = null;
-          }
-          unauthorizedRef.current = false;
-          setConnected(true);
-          wsRef.current = websocket;
-          addOutput({ type: 'system', text: 'Connected to terminal server' });
-        };
-
-        websocket.onmessage = (event) => {
-          const message = JSON.parse(event.data);
-          handleMessage(message);
-        };
-
-        websocket.onclose = (event) => {
-          setConnected(false);
-          wsRef.current = null;
-          if (event.code === 4401) {
-            if (!unauthorizedRef.current) {
-              addOutput({ type: 'error', text: 'Wrong control password. Update it above to reconnect.' });
-            }
-            return;
-          }
-          reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
-        };
-
-        websocket.onerror = () => {
-          setConnected(false);
-          setOutput((prev) => [...prev, { type: 'error', text: 'Connection error. Retrying...' }]);
-        };
-      } catch (error) {
-        setConnected(false);
-        setOutput((prev) => [...prev, { type: 'error', text: `Failed to connect. ${error.message}` }]);
-        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
-      }
-    };
-
-    connectWebSocket();
-
-    return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, [controlPassword, passwordRequired]);
+  const unauthorizedText = passwordRequired
+    ? 'Wrong control password. Update it above to reconnect.'
+    : 'Launch in Password Mode to access terminal.';
 
   useEffect(() => {
     if (outputEndRef.current) {
@@ -82,10 +28,15 @@ const WindowTerminal = ({ controlPassword }) => {
     }
   }, [output]);
 
-  const handleMessage = (message) => {
+  const addOutput = useCallback((item) => {
+    setOutput((prev) => [...prev, { ...item, timestamp: Date.now() }]);
+  }, []);
+
+  const handleMessage = useCallback((message) => {
     switch (message.type) {
       case 'welcome':
         setWorkingDir(message.working_dir);
+        addOutput({ type: 'system', text: 'Connected to terminal server' });
         addOutput({ type: 'system', text: message.message });
         break;
       case 'cwd_changed':
@@ -115,7 +66,7 @@ const WindowTerminal = ({ controlPassword }) => {
       case 'error':
         if (message.reason === 'unauthorized') {
           unauthorizedRef.current = true;
-          addOutput({ type: 'error', text: 'Wrong control password. Update it above to reconnect.' });
+          addOutput({ type: 'error', text: unauthorizedText });
           break;
         }
         addOutput({ type: 'error', text: message.message });
@@ -123,11 +74,63 @@ const WindowTerminal = ({ controlPassword }) => {
       default:
         break;
     }
-  };
+  }, [addOutput, unauthorizedText]);
 
-  const addOutput = (item) => {
-    setOutput((prev) => [...prev, { ...item, timestamp: Date.now() }]);
-  };
+  useEffect(() => {
+    const connectWebSocket = () => {
+      try {
+        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const websocket = new WebSocket(`${protocol}://${window.location.hostname}:8003`);
+
+        websocket.onopen = () => {
+          if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+            reconnectTimeoutRef.current = null;
+          }
+          unauthorizedRef.current = false;
+          setConnected(true);
+          wsRef.current = websocket;
+        };
+
+        websocket.onmessage = (event) => {
+          const message = JSON.parse(event.data);
+          handleMessage(message);
+        };
+
+        websocket.onclose = (event) => {
+          setConnected(false);
+          wsRef.current = null;
+          if (event.code === 4401) {
+            if (!unauthorizedRef.current) {
+              addOutput({ type: 'error', text: unauthorizedText });
+            }
+            return;
+          }
+          reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
+        };
+
+        websocket.onerror = () => {
+          setConnected(false);
+          setOutput((prev) => [...prev, { type: 'error', text: 'Connection error. Retrying...' }]);
+        };
+      } catch (error) {
+        setConnected(false);
+        setOutput((prev) => [...prev, { type: 'error', text: `Failed to connect. ${error.message}` }]);
+        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
+      }
+    };
+
+    connectWebSocket();
+
+    return () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, [addOutput, handleMessage, controlPassword, passwordRequired, unauthorizedText]);
 
   const sendCommand = (command) => {
     if (!wsRef.current || !connected) {
@@ -276,7 +279,7 @@ const WindowTerminal = ({ controlPassword }) => {
               disabled={!connected}
               placeholder={passwordRequired
                 ? (connected ? 'Type command...' : 'Connecting...')
-                : (connected ? 'Type command...' : 'Connecting...')}
+                : 'Launch in Password Mode to access'}
             />
           </div>
         </div>

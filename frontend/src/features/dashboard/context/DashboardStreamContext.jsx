@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import {
@@ -34,42 +34,36 @@ const initialState = {
 
 export function DashboardStreamProvider({ children }) {
   const [state, setState] = useState(initialState);
-  const [clock, setClock] = useState(Date.now());
   const queryClient = useQueryClient();
   const reconnectTimerRef = useRef(null);
   const reconnectAttemptRef = useRef(0);
 
-  const refreshProcesses = async () => {
+  const refreshProcesses = useCallback(async () => {
     const data = await queryClient.fetchQuery({
       queryKey: dashboardQueryKeys.processes,
       queryFn: fetchProcesses
     });
     setState((prev) => ({ ...prev, processes: data, lastUpdate: Date.now() }));
     return data;
-  };
+  }, [queryClient]);
 
-  const refreshPorts = async () => {
+  const refreshPorts = useCallback(async () => {
     const data = await queryClient.fetchQuery({
       queryKey: dashboardQueryKeys.ports,
       queryFn: fetchPorts
     });
     setState((prev) => ({ ...prev, ports: data, lastUpdate: Date.now() }));
     return data;
-  };
+  }, [queryClient]);
 
-  const refreshNetwork = async () => {
+  const refreshNetwork = useCallback(async () => {
     const data = await queryClient.fetchQuery({
       queryKey: dashboardQueryKeys.networkInfo,
       queryFn: fetchNetworkInfo
     });
     setState((prev) => ({ ...prev, networkInfo: data, lastUpdate: Date.now() }));
     return data;
-  };
-
-  useEffect(() => {
-    const timer = setInterval(() => setClock(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => {
     let source;
@@ -215,7 +209,7 @@ export function DashboardStreamProvider({ children }) {
   const stale = useMemo(() => {
     if (!state.lastUpdate) return true;
     return Date.now() - state.lastUpdate > 15000;
-  }, [clock, state.lastUpdate, state.lastHeartbeat, state.streamStatus]);
+  }, [state.lastUpdate]);
 
   const value = useMemo(() => ({
     ...state,
@@ -223,7 +217,7 @@ export function DashboardStreamProvider({ children }) {
     refreshProcesses,
     refreshPorts,
     refreshNetwork
-  }), [state, stale]);
+  }), [refreshNetwork, refreshPorts, refreshProcesses, stale, state]);
 
   return (
     <DashboardStreamContext.Provider value={value}>

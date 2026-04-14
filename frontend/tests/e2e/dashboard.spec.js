@@ -44,6 +44,30 @@ function sseBody({ hostname = 'playwright-box' } = {}) {
   ].join('\n');
 }
 
+async function mockAuthSession(route) {
+  const method = route.request().method();
+
+  if (method === 'DELETE') {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true })
+    });
+    return;
+  }
+
+  const body = JSON.parse(route.request().postData() ?? '{}');
+  await route.fulfill({
+    status: body.password === 'secret-123' ? 200 : 401,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      valid: body.password === 'secret-123',
+      configured: true,
+      required: true
+    })
+  });
+}
+
 test('hides the password field when password protection is disabled', async ({ page }) => {
   await page.route('**/api/auth/status', async (route) => {
     await route.fulfill({
@@ -52,6 +76,8 @@ test('hides the password field when password protection is disabled', async ({ p
       body: JSON.stringify({ enabled: false, required: false })
     });
   });
+
+  await page.route('**/api/auth/session', mockAuthSession);
 
   await page.route('**/api/events/stream', async (route) => {
     await route.fulfill({
@@ -90,6 +116,8 @@ test('shows the password field when password protection is enabled', async ({ pa
       })
     });
   });
+
+  await page.route('**/api/auth/session', mockAuthSession);
 
   await page.route('**/api/events/stream', async (route) => {
     await route.fulfill({

@@ -1,4 +1,5 @@
 module.exports = {
+  ignorePatterns: ['dist/**', 'public/mockServiceWorker.js', 'public/sw.js'],
   env: {
     browser: true,
     es2021: true,
