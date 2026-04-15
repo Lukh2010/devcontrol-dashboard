@@ -14,17 +14,19 @@ This application includes multiple layers of security protection for command exe
 
 #### 1. Command Classification
 - **Dangerous Pattern Detection**: Blocks known dangerous commands
-- **Sudo Protection**: Requires confirmation for privileged commands
-- **Pattern Matching**: Uses regex to detect potentially harmful operations
+- **Unknown Command Confirmation**: Requires explicit confirmation for commands outside the allowlist
+- **Pattern Matching**: Uses regex and shell-operator checks to detect potentially harmful operations
 
 #### 2. Shell Injection Prevention
 - **Platform-Specific Handling**: Different security measures for Windows vs Unix
 - **Command Validation**: Input validation before execution
-- **Safe Subprocess Usage**: Uses `shlex.split()` on Unix systems to prevent shell injection
+- **Safe Subprocess Usage**: Uses tokenized subprocess execution for user input
+- **No `shell=True` Fallbacks**: User-provided commands do not fall back to shell execution on parse errors
 
 #### 3. Input Sanitization
 - **Command Filtering**: Blocks commands like `rm -rf`, `format`, `shutdown`
 - **Windows-Specific Protection**: Blocks `del`, `rmdir`, `format`, `shutdown` on Windows
+- **Shell Operator Blocking**: Blocks operators like `&&`, `&`, `||`, `|`, `>`, `<`, `;`, backticks, and command substitution
 - **Timeout Protection**: 30-second timeout prevents hanging commands
 
 ### Protected Commands
@@ -50,12 +52,17 @@ The following command patterns are blocked:
 ### Network Security
 
 #### CORS Configuration
-- **Current Setting**: The backend currently allows all origins with `CORS(..., origins="*")`
-- **Development Only**: This is convenient for local development but not suitable for internet exposure
+- **Current Setting**: The backend allows only local frontend origins: `http://127.0.0.1:3000` and `http://localhost:3000`
+- **Local Only**: This is intended for local development and should not be widened for untrusted environments
 
 #### WebSocket Security
-- **Password Protected**: Terminal WebSocket access requires the shared control password
-- **Network Reachability**: The backend and WebSocket server bind to `0.0.0.0`, so host/network exposure depends on firewall and local network setup
+- **Password Protected**: Terminal WebSocket access requires a valid control session cookie or `X-DevControl-Password`
+- **Rate Limited**: Repeated handshake attempts are throttled and temporarily locked out after too many failures
+- **Network Reachability**: Frontend, backend, and terminal services are intended to bind to `127.0.0.1` only
+
+#### HTTP Action Protection
+- **Session-Aware Auth**: Protected HTTP actions accept a valid control session cookie or `X-DevControl-Password`
+- **Rate Limited**: Auth endpoints and protected actions use in-memory rate limiting with `429` and `Retry-After`
 
 ### Data Protection
 
@@ -67,7 +74,7 @@ The following command patterns are blocked:
 #### Temporary Data
 - **Session Data**: Terminal sessions are temporary
 - **No Persistence**: No long-term data storage
-- **Memory Only**: Sensitive values are kept in memory; PID ownership metadata is stored in a local PID file for cleanup and access control
+- **Memory Only**: Sensitive values, session tokens, and rate-limit state are kept in memory; PID ownership metadata is stored in a local PID file for cleanup and access control
 
 ## Reporting Security Issues
 
@@ -146,6 +153,7 @@ This application uses multiple layers of security:
 - **Command Validation**: Input validation and filtering
 - **User Confirmation**: Dangerous commands require confirmation
 - **Access Control**: Sensitive actions require the shared control password
+- **Rate Limiting**: Repeated auth failures and bursts against protected actions are throttled
 
 ## Security Testing
 
@@ -154,6 +162,7 @@ This application uses multiple layers of security:
 - **Command Injection Tests**: Tests for shell injection vulnerabilities
 - **Input Validation Tests**: Tests for input validation bypasses
 - **Pattern Matching Tests**: Tests for dangerous command detection
+- **Rate Limit Tests**: Tests for auth lockouts and throttling of protected endpoints
 
 ### Manual Testing
 

@@ -2,6 +2,9 @@ import os
 
 from app import create_app
 from security import (
+    FAILED_AUTH_STATE,
+    LOCKOUT_STATE,
+    RATE_LIMIT_STATE,
     SESSION_COOKIE_NAME,
     SESSION_TOKENS,
     create_control_session,
@@ -46,8 +49,16 @@ class FakeRuntime:
         return None
 
 
+def clear_security_state():
+    SESSION_TOKENS.clear()
+    RATE_LIMIT_STATE.clear()
+    FAILED_AUTH_STATE.clear()
+    LOCKOUT_STATE.clear()
+
+
 def test_verify_control_password_matching_mismatched_and_empty(monkeypatch):
     monkeypatch.setenv("DEVCONTROL_PASSWORD", "secret-123")
+    clear_security_state()
 
     assert verify_control_password("secret-123") is True
     assert verify_control_password("wrong-password") is False
@@ -56,7 +67,7 @@ def test_verify_control_password_matching_mismatched_and_empty(monkeypatch):
 
 def test_require_control_password_accepts_header_auth(monkeypatch):
     monkeypatch.setenv("DEVCONTROL_PASSWORD", "secret-123")
-    SESSION_TOKENS.clear()
+    clear_security_state()
     app = create_app(FakeRuntime())
     client = app.test_client()
 
@@ -72,7 +83,7 @@ def test_require_control_password_accepts_header_auth(monkeypatch):
 
 def test_require_control_password_accepts_cookie_auth(monkeypatch):
     monkeypatch.setenv("DEVCONTROL_PASSWORD", "secret-123")
-    SESSION_TOKENS.clear()
+    clear_security_state()
     app = create_app(FakeRuntime())
     client = app.test_client()
     token, _ = create_control_session()
@@ -85,3 +96,33 @@ def test_require_control_password_accepts_cookie_auth(monkeypatch):
     assert payload["success"] is True
     assert payload["command"] == "echo cookie"
 
+
+def test_auth_session_locks_out_after_repeated_failures(monkeypatch):
+    monkeypatch.setenv("DEVCONTROL_PASSWORD", "secret-123")
+    clear_security_state()
+    app = create_app(FakeRuntime())
+    client = app.test_client()
+
+    for _ in range(4):
+        response = client.post("/api/auth/session", json={"password": "wrong-password"})
+        assert response.status_code == 401
+
+    locked_response = client.post("/api/auth/session", json={"password": "wrong-password"})
+    assert locked_response.status_code == 429
+    assert locked_response.get_json()["retry_after"] >= 1
+
+
+def test_commands_run_is_rate_limited(monkeypatch):
+    monkeypatch.setenv("DEVCONTROL_PASSWORD", "secret-123")
+    clear_security_state()
+    app = create_app(FakeRuntime())
+    client = app.test_client()
+    headers = {"X-DevControl-Password": "secret-123"}
+
+    for _ in range(12):
+        response = client.post("/api/commands/run", json={"command": "echo hello"}, headers=headers)
+        assert response.status_code == 200
+
+    limited_response = client.post("/api/commands/run", json={"command": "echo hello"}, headers=headers)
+    assert limited_response.status_code == 429
+    assert limited_response.get_json()["retry_after"] >= 1

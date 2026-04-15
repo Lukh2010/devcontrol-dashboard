@@ -3,6 +3,7 @@
 DevControl Dashboard is a local machine control panel with a React frontend and a Python backend. It combines live telemetry, process and port controls, network inspection, and a WebSocket-backed terminal behind an optional control password.
 
 It is designed for local or trusted-network use, not public exposure.
+The frontend dev server, backend API, and terminal gateway are intended to bind to `127.0.0.1` only.
 
 ## What It Does
 
@@ -86,6 +87,8 @@ python start.py stop
 
 `stop` terminates only dashboard-owned registered processes.
 
+The wrapper scripts in `tools/` are thin entrypoints only. They delegate to `start.py` instead of carrying separate startup or cleanup logic.
+
 ### Manual Start
 
 Backend:
@@ -103,6 +106,8 @@ cd frontend
 npm install
 npm run dev -- --host 127.0.0.1
 ```
+
+The committed Vite config already binds the frontend dev server to `127.0.0.1`, so it is not reachable from other interfaces unless you explicitly override it.
 
 Optional password:
 
@@ -135,15 +140,17 @@ Current safeguards:
 
 - optional password gate for sensitive actions
 - server-side auth session cookie for protected HTTP actions
+- `X-DevControl-Password` support for protected HTTP actions and terminal handshake
 - dashboard-owned PID restriction for process and port termination
 - command classification with dangerous-command blocking and explicit confirmation for unknown commands
-- localhost-only backend and terminal binding
+- shell operators such as `&&`, `|`, `>`, `<`, backticks, and command substitution are blocked for user input
+- in-memory rate limiting for auth, protected HTTP actions, and terminal handshakes
+- localhost-only frontend, backend, and terminal binding
 - admin check for process termination on Windows
 
 Current limitations:
 
 - terminal WebSocket still uses a single local-session model, not multi-user auth
-- there are no rate limits
 - terminal mode is subprocess-based, not a full PTY shell
 
 Use this project only on a trusted machine or trusted local network.
@@ -219,6 +226,8 @@ npm install
 npm run dev
 ```
 
+By default, Vite binds to `127.0.0.1:3000` in this repo.
+
 Build:
 
 ```bash
@@ -243,6 +252,8 @@ E2E tests:
 npm run test:e2e
 ```
 
+Test directories and test files are gitignored in this repo. Keep local test work local unless you explicitly decide to force-add it.
+
 ### Mocked Frontend Mode
 
 MSW is configured for optional browser mocking in development.
@@ -260,6 +271,8 @@ On Windows PowerShell:
 $env:VITE_ENABLE_MSW = "true"
 npm run dev
 ```
+
+Mocked mode still stays bound to `127.0.0.1`.
 
 ## Backend Development
 
@@ -296,6 +309,8 @@ The GitHub Actions workflow runs:
 - dependency review on pull requests
 - Trivy security scanning
 
+Note: local test files are ignored by Git, so any new or modified tests will not be picked up for commits unless you deliberately override the ignore rules.
+
 Workflow file:
 
 - [.github/workflows/ci.yml](.github/workflows/ci.yml)
@@ -318,6 +333,8 @@ tools\cleanup_ports.bat
 python tools/cleanup_ports.py
 ```
 
+All cleanup wrappers now forward to `python start.py stop`.
+
 ### Frontend test or build output appears in Git
 
 Generated folders like `frontend/dist`, `frontend/test-results`, and Playwright reports should stay ignored. Only commit source files, configs, and the lockfile.
@@ -325,6 +342,10 @@ Generated folders like `frontend/dist`, `frontend/test-results`, and Playwright 
 ### Protected actions return `401`
 
 The frontend password does not match the backend `DEVCONTROL_PASSWORD`, or the HTTP auth session cookie is missing/expired.
+
+### Protected actions return `429`
+
+The in-memory rate limiter has temporarily throttled repeated auth failures or bursts against protected actions. Wait for the reported `Retry-After` interval and try again.
 
 ### Process controls do not work on Windows
 
@@ -338,6 +359,7 @@ Check:
 - port `8003` is free
 - the password matches if protection is enabled
 - the current browser session has a valid control session cookie
+- you have not triggered the terminal handshake rate limit
 
 ## Roadmap Direction
 

@@ -6,12 +6,25 @@ import time
 import psutil
 from flask import has_request_context, request
 
-from command_classifier import CommandClassifier
+from command_classifier import (
+    CommandClassifier,
+    SHELL_OPERATOR_MESSAGE,
+    contains_dangerous_shell_metachars,
+)
 from dashboard_pids import is_dashboard_pid
 
 
 class ActionExecutorService:
     """Executes privileged dashboard actions and emits action events."""
+
+    WINDOWS_SHELL_BUILTINS = {
+        "cd",
+        "chdir",
+        "cls",
+        "dir",
+        "echo",
+        "set",
+    }
 
     def __init__(self, event_bus):
         self.event_bus = event_bus
@@ -54,6 +67,13 @@ class ActionExecutorService:
             self._publish_audit(command, "invalid", None)
             return {"error": "Optional field 'name' must be a string"}, 400
 
+        command = command.strip()
+
+        if contains_dangerous_shell_metachars(command):
+            self._publish_action("run_command", "failed", command=command, name=name, reason="shell_operator_blocked")
+            self._publish_audit(command, "dangerous", None)
+            return {"error": SHELL_OPERATOR_MESSAGE}, 400
+
         classification, reason = self.classifier.classify_command(command)
 
         if classification == "dangerous":
@@ -75,17 +95,42 @@ class ActionExecutorService:
 
         try:
             if platform.system() == "Windows":
-                args = ["cmd.exe", "/C", *shlex.split(command, posix=False)]
-                result = subprocess.run(
-                    args,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    check=False
-                )
-            else:
-                try:
-                    args = shlex.split(command)
+                args = shlex.split(command, posix=False)
+                if not args:
+                    self._publish_audit(command, "invalid", None)
+                    return {"error": "Command must contain an executable"}, 400
+
+                executable = args[0].lower()
+                if executable == "echo":
+                    stdout_text = f"{' '.join(args[1:])}\n"
+                    payload = {
+                        "command": command,
+                        "name": name,
+                        "return_code": 0,
+                        "stdout": stdout_text,
+                        "stderr": "",
+                        "success": True
+                    }
+                    self._publish_action(
+                        "run_command",
+                        "success",
+                        command=command,
+                        name=name,
+                        classification=classification,
+                        return_code=0
+                    )
+                    self._publish_audit(command, classification, 0)
+                    return payload, 200
+
+                if executable in self.WINDOWS_SHELL_BUILTINS:
+                    result = subprocess.run(
+                        ["cmd.exe", "/C", executable, *args[1:]],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        check=False
+                    )
+                else:
                     result = subprocess.run(
                         args,
                         capture_output=True,
@@ -93,15 +138,19 @@ class ActionExecutorService:
                         timeout=30,
                         check=False
                     )
-                except ValueError:
-                    result = subprocess.run(
-                        command,
-                        shell=True,
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                        check=False
-                    )
+            else:
+                args = shlex.split(command)
+                if not args:
+                    self._publish_audit(command, "invalid", None)
+                    return {"error": "Command must contain an executable"}, 400
+
+                result = subprocess.run(
+                    args,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=False
+                )
         except subprocess.TimeoutExpired:
             self._publish_action("run_command", "failed", command=command, name=name, reason="timeout")
             self._publish_audit(command, classification, None)
@@ -109,7 +158,7 @@ class ActionExecutorService:
         except ValueError as exc:
             self._publish_action("run_command", "failed", command=command, name=name, reason="parse_error")
             self._publish_audit(command, classification, None)
-            return {"error": str(exc)}, 400
+            return {"error": f"Command could not be parsed safely: {exc}"}, 400
         except Exception as exc:
             self._publish_action("run_command", "failed", command=command, name=name, reason=str(exc))
             self._publish_audit(command, classification, None)

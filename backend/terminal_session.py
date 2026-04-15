@@ -13,7 +13,11 @@ import platform
 import shlex
 from typing import Dict, Optional, Any
 from websockets.legacy.server import WebSocketServerProtocol
-from command_classifier import CommandClassifier
+from command_classifier import (
+    CommandClassifier,
+    SHELL_OPERATOR_MESSAGE,
+    contains_dangerous_shell_metachars,
+)
 
 # PTY support - Windows compatible
 if platform.system() == 'Windows':
@@ -32,6 +36,15 @@ else:
         print("Warning: ptyprocess not available, falling back to subprocess")
 
 class TerminalSession:
+    WINDOWS_SHELL_BUILTINS = {
+        'cd',
+        'chdir',
+        'cls',
+        'dir',
+        'echo',
+        'set',
+    }
+
     def __init__(self, session_id: str, websocket: WebSocketServerProtocol, working_dir: str = None):
         self.session_id = session_id
         self.websocket = websocket
@@ -77,6 +90,13 @@ class TerminalSession:
         try:
             command = (command or "").strip()
             if not command:
+                return
+
+            if contains_dangerous_shell_metachars(command):
+                await self.send_message({
+                    'type': 'error',
+                    'message': SHELL_OPERATOR_MESSAGE
+                })
                 return
 
             # Classify command
@@ -209,6 +229,32 @@ class TerminalSession:
             if await self._handle_builtin_command(command):
                 return
 
+            try:
+                args = self._parse_command(command)
+            except ValueError as exc:
+                await self.send_message({
+                    'type': 'error',
+                    'message': f'Command could not be parsed safely: {exc}'
+                })
+                return
+
+            if not args:
+                await self.send_message({
+                    'type': 'error',
+                    'message': 'Command must contain an executable'
+                })
+                return
+
+            executable = args[0].lower()
+
+            if platform.system() == 'Windows' and executable == 'echo':
+                await self.send_message({
+                    'type': 'output',
+                    'data': f"{' '.join(args[1:])}\n",
+                    'timestamp': time.time()
+                })
+                return
+
             if platform.system() == 'Windows':
                 if any(cmd in command.lower() for cmd in ['del', 'rmdir', 'format', 'shutdown']):
                     await self.send_message({
@@ -242,30 +288,30 @@ class TerminalSession:
                             'type': 'warning',
                             'message': '⚠️ Could not verify admin privileges, trying command anyway...'
                         })
-                process = await asyncio.create_subprocess_exec(
-                    "cmd.exe",
-                    "/C",
-                    command,
-                    cwd=self.working_dir,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-            else:
-                try:
-                    args = self._parse_command(command)
+                if executable in self.WINDOWS_SHELL_BUILTINS:
+                    process = await asyncio.create_subprocess_exec(
+                        "cmd.exe",
+                        "/C",
+                        executable,
+                        *args[1:],
+                        cwd=self.working_dir,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                else:
                     process = await asyncio.create_subprocess_exec(
                         *args,
                         cwd=self.working_dir,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE
                     )
-                except ValueError:
-                    process = await asyncio.create_subprocess_shell(
-                        command,
-                        cwd=self.working_dir,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
-                    )
+            else:
+                process = await asyncio.create_subprocess_exec(
+                    *args,
+                    cwd=self.working_dir,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
 
             self.process = process
             try:

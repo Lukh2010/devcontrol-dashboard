@@ -11,7 +11,12 @@ from dashboard_pids import register_dashboard_pid
 from security import (
     PROTECTED_ENDPOINTS_MESSAGE,
     SESSION_COOKIE_NAME,
+    RATE_LIMITED_MESSAGE,
+    clear_failed_attempts,
+    consume_rate_limit,
+    get_rate_limit_status,
     has_valid_control_session,
+    register_failed_attempt,
     verify_control_password
 )
 from terminal_session import TerminalSessionManager
@@ -30,6 +35,19 @@ class TerminalGatewayService:
 
     async def handle_websocket(self, websocket, path):
         try:
+            client_ip = self._get_client_ip(websocket)
+            allowed, retry_after = consume_rate_limit("terminal_handshake", client_ip)
+            if not allowed:
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "message": RATE_LIMITED_MESSAGE,
+                    "reason": "rate_limited",
+                    "retry_after": retry_after
+                }))
+                self._publish_terminal_state("rate_limited", reason="too_many_requests", retry_after=retry_after)
+                await websocket.close(code=4429, reason="Rate limited")
+                return
+
             cookie_header = websocket.request_headers.get("Cookie", "")
             cookies = SimpleCookie()
             if cookie_header:
@@ -40,15 +58,19 @@ class TerminalGatewayService:
             provided_password = websocket.request_headers.get("X-DevControl-Password", "")
 
             if not has_valid_control_session(session_token) and not verify_control_password(provided_password):
+                register_failed_attempt("terminal_handshake", client_ip)
+                allowed_after_failure, failure_retry_after = get_rate_limit_status("terminal_handshake", client_ip)
                 await websocket.send(json.dumps({
                     "type": "error",
                     "message": PROTECTED_ENDPOINTS_MESSAGE,
-                    "reason": "unauthorized"
+                    "reason": "unauthorized",
+                    **({"retry_after": failure_retry_after} if not allowed_after_failure else {})
                 }))
                 self._publish_terminal_state("unauthorized", reason="invalid_password")
                 await websocket.close(code=4401, reason="Unauthorized")
                 return
 
+            clear_failed_attempts("terminal_handshake", client_ip)
             session_id = await self.terminal_manager.create_session(websocket)
             self._publish_terminal_state("connected", session_id=session_id)
 
@@ -118,3 +140,12 @@ class TerminalGatewayService:
             "status": status,
             **details
         })
+
+    def _get_client_ip(self, websocket) -> str:
+        forwarded_for = websocket.request_headers.get("X-Forwarded-For", "").strip()
+        if forwarded_for:
+            return forwarded_for.split(",")[0].strip()
+        remote_address = getattr(websocket, "remote_address", None)
+        if isinstance(remote_address, tuple) and remote_address:
+            return str(remote_address[0])
+        return "unknown"

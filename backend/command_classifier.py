@@ -1,11 +1,83 @@
 """
-Command Classifier for Terminal Security
-Classifies commands as safe or dangerous and handles sudo confirmations
+Command Classifier for Terminal Security.
+
+Classifies commands as safe, dangerous, interactive, or unknown and rejects
+actual shell operator usage without overblocking ordinary arguments.
 """
 
 import re
-from typing import Tuple, List
+from typing import List, Tuple
 
+
+SHELL_OPERATOR_MESSAGE = (
+    "Shell operators like &&, ||, |, >, <, ;, backticks, and command substitution "
+    "are not allowed for security reasons"
+)
+
+
+def contains_dangerous_shell_metachars(command: str) -> bool:
+    """Return whether the command contains blocked shell operators."""
+    if not isinstance(command, str):
+        return False
+
+    stripped_command = command.strip()
+    if not stripped_command:
+        return False
+
+    in_single_quote = False
+    in_double_quote = False
+    escaped = False
+    index = 0
+
+    while index < len(stripped_command):
+        char = stripped_command[index]
+        next_char = stripped_command[index + 1] if index + 1 < len(stripped_command) else ""
+
+        if escaped:
+            escaped = False
+            index += 1
+            continue
+
+        if char == "\\" and not in_single_quote:
+            escaped = True
+            index += 1
+            continue
+
+        if char == "'" and not in_double_quote:
+            in_single_quote = not in_single_quote
+            index += 1
+            continue
+
+        if char == '"' and not in_single_quote:
+            in_double_quote = not in_double_quote
+            index += 1
+            continue
+
+        if in_single_quote or in_double_quote:
+            index += 1
+            continue
+
+        if char == "`":
+            return True
+
+        if char == "$" and next_char in ("(", "{"):
+            return True
+
+        if char == "&" and next_char == "&":
+            return True
+
+        if char == "|" and next_char == "|":
+            return True
+
+        if char == ">" and next_char == ">":
+            return True
+
+        if char in {"|", ">", "<", ";"}:
+            return True
+
+        index += 1
+
+    return False
 class CommandClassifier:
     def __init__(self):
         # Dangerous command patterns
@@ -120,6 +192,9 @@ class CommandClassifier:
         Returns: (classification, reason)
         """
         command_lower = command.lower().strip()
+
+        if contains_dangerous_shell_metachars(command):
+            return 'dangerous', SHELL_OPERATOR_MESSAGE
         
         # Check for dangerous commands
         for pattern in self.dangerous_patterns:

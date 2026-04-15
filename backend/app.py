@@ -9,9 +9,12 @@ from flask_cors import CORS
 from security import (
     SESSION_COOKIE_NAME,
     SESSION_TTL_SECONDS,
+    check_rate_limit_or_response,
+    clear_failed_attempts,
     create_control_session,
     invalidate_request_control_session,
     is_password_protection_enabled,
+    register_failed_attempt,
     require_control_password,
     verify_control_password
 )
@@ -96,7 +99,7 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
 
     @app.route("/api/port/<int:port>", methods=["DELETE"])
     def kill_process_by_port(port):
-        auth_error = require_control_password()
+        auth_error = require_control_password("port_delete")
         if auth_error:
             return auth_error
 
@@ -105,7 +108,7 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
 
     @app.route("/api/commands/run", methods=["POST"])
     def run_command():
-        auth_error = require_control_password()
+        auth_error = require_control_password("commands_run")
         if auth_error:
             return auth_error
 
@@ -125,7 +128,7 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
 
     @app.route("/api/processes/<int:pid>/kill", methods=["POST"])
     def kill_process(pid):
-        auth_error = require_control_password()
+        auth_error = require_control_password("process_kill")
         if auth_error:
             return auth_error
 
@@ -190,6 +193,10 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
     @app.route("/api/auth/validate", methods=["POST"])
     def validate_control_password():
         try:
+            rate_limit_error = check_rate_limit_or_response("auth_validate")
+            if rate_limit_error:
+                return rate_limit_error
+
             if not is_password_protection_enabled():
                 return jsonify({
                     "valid": True,
@@ -199,9 +206,14 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
 
             data = request.get_json(silent=True) or {}
             provided_password = data.get("password", "")
+            is_valid = verify_control_password(provided_password)
+            if is_valid:
+                clear_failed_attempts("auth_validate")
+            else:
+                register_failed_attempt("auth_validate")
 
             return jsonify({
-                "valid": verify_control_password(provided_password),
+                "valid": is_valid,
                 "configured": True,
                 "required": True
             })
@@ -211,6 +223,10 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
     @app.route("/api/auth/session", methods=["POST"])
     def create_auth_session():
         try:
+            rate_limit_error = check_rate_limit_or_response("auth_session")
+            if rate_limit_error:
+                return rate_limit_error
+
             if not is_password_protection_enabled():
                 return jsonify({
                     "valid": True,
@@ -222,6 +238,7 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
             provided_password = data.get("password", "")
 
             if not verify_control_password(provided_password):
+                register_failed_attempt("auth_session")
                 response = make_response(jsonify({
                     "valid": False,
                     "configured": True,
@@ -230,6 +247,7 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
                 response.delete_cookie(SESSION_COOKIE_NAME, path="/")
                 return response
 
+            clear_failed_attempts("auth_session")
             token, expires_at = create_control_session()
             response = make_response(jsonify({
                 "valid": True,

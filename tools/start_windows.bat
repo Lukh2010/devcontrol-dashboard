@@ -7,16 +7,9 @@ net session >nul 2>&1
 if %errorLevel% == 0 (
     echo [OK] Running as Administrator
     echo.
-    echo Starting dashboard with admin privileges...
-    echo You can choose at startup whether to use a control password.
-    echo If enabled, enter the same password in the frontend to unlock protected actions.
-    echo Press Ctrl+C to stop (will clean up automatically)
+    echo Forwarding to start.py run...
     echo.
-    python start.py
-    echo.
-    echo [STOP] Dashboard stopped, running cleanup...
-    call tools\cleanup_ports.bat
-    echo [OK] All processes cleaned up
+    python start.py run
 ) else (
     echo [ERROR] Not running as Administrator!
     echo Please right-click this file and select "Run as administrator"

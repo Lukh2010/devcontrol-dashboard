@@ -16,6 +16,7 @@ class TelemetryCollectorService:
         self._cpu_cache = {}
         self._last_cpu_update = 0
         self._process_cpu_times = {}
+        self._cpu_cache_ready = False
         self._running = False
         self._thread = None
         self.collectors = {
@@ -108,7 +109,8 @@ class TelemetryCollectorService:
             cpu_count = max(psutil.cpu_count() or 1, 1)
             new_cache = {}
             new_cpu_times = {}
-            elapsed = current_time - self._last_cpu_update if self._last_cpu_update else 0
+            previous_snapshot_exists = bool(self._process_cpu_times) and self._last_cpu_update > 0
+            elapsed = current_time - self._last_cpu_update if previous_snapshot_exists else 0.0
 
             for proc in psutil.process_iter(["pid"]):
                 try:
@@ -125,11 +127,12 @@ class TelemetryCollectorService:
                     normalized_cpu = min(max((cpu_delta / elapsed) / cpu_count * 100, 0.0), 100.0)
                     new_cache[proc.pid] = normalized_cpu
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                    new_cache[proc.pid] = 0
+                    continue
 
             self._cpu_cache = new_cache
             self._process_cpu_times = new_cpu_times
             self._last_cpu_update = current_time
+            self._cpu_cache_ready = previous_snapshot_exists and elapsed > 0
         except Exception as exc:
             print(f"Error updating CPU cache: {exc}")
 
@@ -139,7 +142,7 @@ class TelemetryCollectorService:
         for proc in psutil.process_iter(["pid", "name", "memory_info", "status"]):
             try:
                 pinfo = proc.info
-                cpu_percent = self._cpu_cache.get(proc.pid, 0)
+                cpu_percent = self._cpu_cache.get(proc.pid, 0.0) if self._cpu_cache_ready else 0.0
                 memory_mb = pinfo["memory_info"].rss / 1024 / 1024 if pinfo["memory_info"] else 0
                 if pinfo["name"] and pinfo["name"] != "System Idle Process":
                     processes.append({
@@ -151,7 +154,9 @@ class TelemetryCollectorService:
                     })
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
-        processes.sort(key=lambda process: process["cpu_percent"], reverse=True)
+        processes.sort(
+            key=lambda process: (-process["cpu_percent"], -process["memory_mb"], process["pid"])
+        )
         return processes[:15]
 
     def collect_ports(self):
