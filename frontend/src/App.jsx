@@ -1,22 +1,104 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Activity, Cpu, Network, Terminal, Wifi } from 'lucide-react';
+import {
+  Activity,
+  ArrowUpRight,
+  Cpu,
+  HardDrive,
+  LockKeyhole,
+  Network,
+  Shield,
+  Terminal,
+  Wifi
+} from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import SystemMonitor from './components/SystemMonitor';
+
+import NetworkHub from './components/NetworkHub';
 import OverviewHighlights from './components/OverviewHighlights';
 import PortControl from './components/PortControl';
-import NetworkHub from './components/NetworkHub';
-import WindowTerminal from './components/WindowTerminal';
 import ProcessManager from './components/ProcessManager';
+import SystemMonitor from './components/SystemMonitor';
+import WindowTerminal from './components/WindowTerminal';
 import { DashboardStreamProvider, useDashboardStream } from './features/dashboard/context/DashboardStreamContext';
 import { useAuthStatus, usePasswordValidation } from './features/dashboard/hooks/useAuthStatus';
 
 const PANELS = [
-  { id: 'overview', label: 'Overview', icon: Activity },
-  { id: 'ports', label: 'Ports', icon: Network },
-  { id: 'process-manager', label: 'Processes', icon: Cpu },
-  { id: 'commands', label: 'Terminal', icon: Terminal },
-  { id: 'network', label: 'Network', icon: Wifi }
+  {
+    id: 'overview',
+    label: 'Overview',
+    icon: Activity
+  },
+  {
+    id: 'ports',
+    label: 'Ports',
+    icon: Network
+  },
+  {
+    id: 'process-manager',
+    label: 'Processes',
+    icon: Cpu
+  },
+  {
+    id: 'commands',
+    label: 'Terminal',
+    icon: Terminal
+  },
+  {
+    id: 'network',
+    label: 'Network',
+    icon: Wifi
+  }
 ];
+
+const PANEL_TITLES = {
+  overview: {
+    title: 'Overview',
+    subtitle: 'Live telemetry and status.'
+  },
+  ports: {
+    title: 'Ports',
+    subtitle: 'Listening services.'
+  },
+  'process-manager': {
+    title: 'Processes',
+    subtitle: 'CPU-heavy tasks.'
+  },
+  commands: {
+    title: 'Terminal',
+    subtitle: 'Protected command access.'
+  },
+  network: {
+    title: 'Network',
+    subtitle: 'Interfaces and gateway.'
+  }
+};
+
+function formatClock(date) {
+  return date.toLocaleTimeString('de-DE', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+}
+
+function formatLastSeen(value) {
+  if (!value) {
+    return 'Awaiting heartbeat';
+  }
+
+  return new Date(value).toLocaleTimeString('de-DE', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+}
+
+function formatBytesToGb(value) {
+  if (!value) {
+    return '...';
+  }
+
+  return `${Math.round(value / 1024 / 1024 / 1024)} GB`;
+}
 
 function AppContent() {
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -36,6 +118,7 @@ function AppContent() {
     streamError,
     stale,
     lastHeartbeat,
+    lastAction,
     refreshProcesses,
     refreshPorts
   } = useDashboardStream();
@@ -57,6 +140,7 @@ function AppContent() {
     if (passwordValidationQuery.isError) {
       return 'error';
     }
+
     return passwordValidationQuery.data?.valid ? 'valid' : 'invalid';
   }, [
     controlPassword,
@@ -78,23 +162,11 @@ function AppContent() {
     }
   }, [passwordProtectionEnabled]);
 
-  const handlePasswordChange = (value) => {
-    setControlPassword(value);
-  };
-
   useEffect(() => {
     let cancelled = false;
 
     const syncSession = async () => {
-      if (!passwordProtectionEnabled || !controlPassword) {
-        await fetch('/api/auth/session', {
-          method: 'DELETE',
-          credentials: 'same-origin'
-        }).catch(() => {});
-        return;
-      }
-
-      if (!passwordValidationQuery.data?.valid) {
+      if (!passwordProtectionEnabled || !controlPassword || !passwordValidationQuery.data?.valid) {
         await fetch('/api/auth/session', {
           method: 'DELETE',
           credentials: 'same-origin'
@@ -129,46 +201,84 @@ function AppContent() {
     };
   }, [controlPassword, passwordProtectionEnabled, passwordValidationQuery.data?.valid]);
 
-  const formatTime = (date) => date.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true
-  });
-
-  const accessBadgeClass = authState === 'disabled'
-    ? 'status-warning'
+  const authBadge = authState === 'disabled'
+    ? { tone: 'status-neutral', label: 'No Password' }
     : authState === 'valid'
-    ? 'status-success'
-    : authState === 'checking'
-      ? 'status-warning'
-      : authState === 'invalid' || authState === 'error'
-        ? 'status-danger'
-        : 'status-warning';
+      ? { tone: 'status-success', label: 'Unlocked' }
+      : authState === 'checking'
+        ? { tone: 'status-warning', label: 'Checking' }
+        : authState === 'invalid'
+          ? { tone: 'status-danger', label: 'Rejected' }
+          : authState === 'error'
+            ? { tone: 'status-danger', label: 'Offline' }
+            : { tone: 'status-warning', label: 'Locked' };
 
-  const accessBadgeText = authState === 'disabled'
-    ? 'No Password'
-    : authState === 'valid'
-    ? 'Unlocked'
-    : authState === 'checking'
-      ? 'Checking'
-      : authState === 'invalid'
-        ? 'Rejected'
-        : authState === 'error'
-          ? 'Offline'
-          : 'Locked';
+  const streamBadge = streamStatus === 'connected'
+    ? { tone: stale ? 'status-warning' : 'status-success', label: stale ? 'Stale stream' : 'Live stream' }
+    : { tone: 'status-warning', label: reconnectAttempt ? `Reconnecting x${reconnectAttempt}` : 'Connecting' };
+
+  const terminalBadge = terminalState === 'connected'
+    ? { tone: 'status-success', label: 'Terminal ready' }
+    : { tone: 'status-neutral', label: 'Terminal idle' };
 
   const passwordHint = authState === 'disabled'
-    ? 'Password protection is disabled for this session.'
+    ? 'Protection disabled for this session.'
     : authState === 'valid'
-    ? 'Password verified.'
-    : authState === 'checking'
-      ? 'Verifying password.'
-      : authState === 'invalid'
-        ? 'Password does not match the backend.'
-        : authState === 'error'
-          ? 'Backend unavailable for validation.'
-          : 'Enter the startup password to unlock protected actions.';
+      ? 'Protected actions unlocked.'
+      : authState === 'checking'
+        ? 'Validating password.'
+        : authState === 'invalid'
+          ? 'Password does not match.'
+          : authState === 'error'
+            ? 'Validation unavailable.'
+            : 'Enter the startup password.';
+
+  const quickStats = [
+    {
+      label: 'Host',
+      value: systemInfo?.hostname || 'Loading',
+      hint: systemInfo?.platform || 'Waiting',
+      icon: Shield
+    },
+    {
+      label: 'Memory',
+      value: formatBytesToGb(systemInfo?.memory_total),
+      hint: performanceData ? `${Math.round(performanceData.memory.percent)}% used` : 'Waiting',
+      icon: HardDrive
+    },
+    {
+      label: 'Processes',
+      value: String(processes?.length || 0),
+      hint: processes?.[0] ? processes[0].name : 'No sample',
+      icon: Cpu
+    },
+    {
+      label: 'Ports',
+      value: String(ports?.length || 0),
+      hint: networkInfo?.default_gateway || 'No gateway',
+      icon: ArrowUpRight
+    }
+  ];
+
+  const telemetryCards = [
+    {
+      label: 'CPU load',
+      value: performanceData ? `${performanceData.cpu_percent.toFixed(1)}%` : '...',
+      progress: performanceData?.cpu_percent ?? 0
+    },
+    {
+      label: 'Memory pressure',
+      value: performanceData ? `${performanceData.memory.percent.toFixed(1)}%` : '...',
+      progress: performanceData?.memory.percent ?? 0
+    },
+    {
+      label: 'Disk usage',
+      value: performanceData ? `${performanceData.disk.percent.toFixed(1)}%` : '...',
+      progress: performanceData?.disk.percent ?? 0
+    }
+  ];
+
+  const panelMeta = PANEL_TITLES[activePanel];
 
   const renderContent = () => {
     if (activePanel === 'overview') {
@@ -176,10 +286,10 @@ function AppContent() {
         <motion.div
           key="overview"
           className="workspace-overview"
-          initial={{ opacity: 0, y: 18 }}
+          initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -12 }}
-          transition={{ duration: 0.28, ease: 'easeOut' }}
+          transition={{ duration: 0.24, ease: 'easeOut' }}
         >
           <SystemMonitor performanceData={performanceData} />
           <OverviewHighlights
@@ -201,10 +311,10 @@ function AppContent() {
         <motion.div
           key="ports"
           className="workspace-single"
-          initial={{ opacity: 0, y: 18 }}
+          initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -12 }}
-          transition={{ duration: 0.28, ease: 'easeOut' }}
+          transition={{ duration: 0.24, ease: 'easeOut' }}
         >
           <PortControl
             controlPassword={controlPassword}
@@ -221,10 +331,10 @@ function AppContent() {
         <motion.div
           key="process-manager"
           className="workspace-single"
-          initial={{ opacity: 0, y: 18 }}
+          initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -12 }}
-          transition={{ duration: 0.28, ease: 'easeOut' }}
+          transition={{ duration: 0.24, ease: 'easeOut' }}
         >
           <ProcessManager
             controlPassword={controlPassword}
@@ -242,10 +352,10 @@ function AppContent() {
         <motion.div
           key="commands"
           className="workspace-single"
-          initial={{ opacity: 0, y: 18 }}
+          initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -12 }}
-          transition={{ duration: 0.28, ease: 'easeOut' }}
+          transition={{ duration: 0.24, ease: 'easeOut' }}
         >
           <WindowTerminal controlPassword={controlPassword} />
         </motion.div>
@@ -256,10 +366,10 @@ function AppContent() {
       <motion.div
         key="network"
         className="workspace-single"
-        initial={{ opacity: 0, y: 18 }}
+        initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -12 }}
-        transition={{ duration: 0.28, ease: 'easeOut' }}
+        transition={{ duration: 0.24, ease: 'easeOut' }}
       >
         <NetworkHub
           networkInfo={networkInfo}
@@ -271,102 +381,163 @@ function AppContent() {
 
   return (
     <motion.div
-      className="app-shell compact-shell"
-      initial={{ opacity: 0, y: 20 }}
+      className="app-shell"
+      initial={{ opacity: 0, y: 24 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, ease: 'easeOut' }}
+      transition={{ duration: 0.3, ease: 'easeOut' }}
     >
-      <motion.header className="topbar" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.05 }}>
-        <div>
-          <div className="topbar-kicker">DevControl</div>
-          <h1 className="topbar-title">Local Control Dashboard</h1>
+      <section className="hero-panel panel">
+        <div className="hero-copy">
+          <span className="hero-kicker">DevControl dashboard</span>
+          <h1 className="hero-title">Modern control surface for your local machine.</h1>
+          <div className="hero-badges">
+            <span className={`status-badge ${authBadge.tone}`}>{authBadge.label}</span>
+            <span className={`status-badge ${streamBadge.tone}`}>{streamBadge.label}</span>
+            <span className={`status-badge ${terminalBadge.tone}`}>{terminalBadge.label}</span>
+          </div>
         </div>
-        <div className="topbar-meta">
-          <div className="topbar-chip">
-            <span className={`status-badge ${accessBadgeClass}`}>{accessBadgeText}</span>
-          </div>
-          <div className="topbar-chip">
-            <span className={`status-badge ${streamStatus === 'connected' ? 'status-success' : 'status-warning'}`}>
-              {streamStatus === 'connected' ? 'Live Stream' : `Reconnecting (${reconnectAttempt})`}
-            </span>
-          </div>
-          <div className="topbar-chip">
-            <span className={`status-badge ${stale ? 'status-danger' : 'status-success'}`}>
-              {stale ? 'Data Stale' : 'Data Fresh'}
-            </span>
-          </div>
-          <div className="topbar-chip">{lastHeartbeat ? `Heartbeat ${new Date(lastHeartbeat).toLocaleTimeString()}` : 'Awaiting heartbeat...'}</div>
-          <div className="topbar-chip">{formatTime(currentTime)}</div>
-        </div>
-      </motion.header>
 
-      <motion.section
-        className="toolbar-panel panel"
-        initial={{ opacity: 0, y: 14 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.08 }}
-      >
-        <div className="toolbar-row">
-          <AnimatePresence initial={false}>
-            {passwordProtectionEnabled ? (
-              <motion.div
-                className="toolbar-block"
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.22, ease: 'easeOut' }}
-              >
-              <label className="field-label" htmlFor="control-password">Control Password</label>
-              <input
-                id="control-password"
-                className="input compact-input"
-                type="password"
-                value={controlPassword}
-                onChange={(event) => handlePasswordChange(event.target.value)}
-                placeholder="Enter startup password"
-              />
-                <div className="input-hint">{streamError || passwordHint}</div>
-              </motion.div>
-            ) : null}
+        <div className="hero-aside">
+          <div className="hero-clock">{formatClock(currentTime)}</div>
+          <div className="hero-meta">Heartbeat {formatLastSeen(lastHeartbeat)}</div>
+          <div className="hero-meta">
+            {stale ? 'Telemetry needs refresh' : 'Telemetry pipeline is healthy'}
+          </div>
+          {lastAction ? (
+            <div className="hero-meta">
+              Last action: {lastAction.action} / {lastAction.status}
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="dashboard-grid">
+        <aside className="sidebar-stack">
+          <section className="panel control-panel">
+            <div className="panel-header compact-header">
+              <div className="panel-title-wrap">
+                <span className="panel-icon">
+                  <LockKeyhole size={18} />
+                </span>
+                <div>
+                  <h2 className="panel-title">Control access</h2>
+                </div>
+              </div>
+            </div>
+
+            <div className="panel-body stack">
+              <AnimatePresence initial={false}>
+                {passwordProtectionEnabled ? (
+                  <motion.div
+                    key="password"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.2, ease: 'easeOut' }}
+                  >
+                    <label className="field-label" htmlFor="control-password">Control Password</label>
+                    <input
+                      id="control-password"
+                      className="input"
+                      type="password"
+                      value={controlPassword}
+                      onChange={(event) => setControlPassword(event.target.value)}
+                      placeholder="Enter startup password"
+                    />
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
+
+              <div className="glass-note">
+                <span className={`status-badge ${authBadge.tone}`}>{authBadge.label}</span>
+                <p>{streamError || passwordHint}</p>
+              </div>
+
+              <div className="stat-grid">
+                {quickStats.map(({ label, value, hint, icon: Icon }) => (
+                  <div key={label} className="mini-card stat-card">
+                    <div className="stat-card-top">
+                      <span className="panel-icon small-icon">
+                        <Icon size={15} />
+                      </span>
+                      <span className="metric-eyebrow">{label}</span>
+                    </div>
+                    <p className="metric-reading compact-reading">{value}</p>
+                    <p className="muted-note">{hint}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-header compact-header">
+              <div className="panel-title-wrap">
+                <span className="panel-icon">
+                  <Activity size={18} />
+                </span>
+                <div>
+                  <h2 className="panel-title">Telemetry pulse</h2>
+                </div>
+              </div>
+            </div>
+            <div className="panel-body stack">
+              {telemetryCards.map((card) => (
+                <div key={card.label} className="telemetry-card">
+                  <div className="telemetry-card-row">
+                    <span className="metric-eyebrow">{card.label}</span>
+                    <span className="telemetry-value">{card.value}</span>
+                  </div>
+                  <div className="progress-track strong-track">
+                    <div className="progress-fill" style={{ width: `${card.progress}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </aside>
+
+        <main className="workspace-stack">
+          <section className="panel nav-panel">
+            <div className="panel-header compact-header">
+              <div>
+                <h2 className="panel-title">{panelMeta.title}</h2>
+                <p className="panel-subtitle">{panelMeta.subtitle}</p>
+              </div>
+              <div className="chip-row">
+                <span className={`status-badge ${streamBadge.tone}`}>{streamBadge.label}</span>
+                <span className={`status-badge ${isAdmin ? 'status-success' : 'status-warning'}`}>
+                  {isAdmin ? 'Admin' : 'User mode'}
+                </span>
+              </div>
+            </div>
+
+            <div className="panel-body">
+              <nav className="nav-grid">
+                {PANELS.map(({ id, label, icon: Icon }) => (
+                  <motion.button
+                    key={id}
+                    type="button"
+                    className={`nav-card ${activePanel === id ? 'active' : ''}`}
+                    onClick={() => setActivePanel(id)}
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.99 }}
+                  >
+                    <span className="panel-icon nav-icon">
+                      <Icon size={16} />
+                    </span>
+                    <span className="nav-card-label">{label}</span>
+                  </motion.button>
+                ))}
+              </nav>
+            </div>
+          </section>
+
+          <AnimatePresence mode="wait" initial={false}>
+            {renderContent()}
           </AnimatePresence>
-
-          <div className="toolbar-block toolbar-block-summary">
-            <div className="summary-card">
-              <span className="summary-label">Host</span>
-              <span className="summary-value">{systemInfo?.hostname || 'Loading...'}</span>
-            </div>
-            <div className="summary-card">
-              <span className="summary-label">Platform</span>
-              <span className="summary-value">{systemInfo?.platform || '...'}</span>
-            </div>
-            <div className="summary-card">
-              <span className="summary-label">Memory</span>
-              <span className="summary-value">
-                {systemInfo ? `${Math.round(systemInfo.memory_total / 1024 / 1024 / 1024)}GB` : '...'}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <nav className="nav-pills compact-pills">
-          {PANELS.map(({ id, label, icon: Icon }) => (
-            <motion.button
-              key={id}
-              className={`nav-pill ${activePanel === id ? 'active' : ''}`}
-              onClick={() => setActivePanel(id)}
-              whileHover={{ y: -2 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Icon size={16} />
-              {label}
-            </motion.button>
-          ))}
-        </nav>
-      </motion.section>
-
-      <AnimatePresence mode="wait" initial={false}>
-        {renderContent()}
-      </AnimatePresence>
+        </main>
+      </section>
     </motion.div>
   );
 }

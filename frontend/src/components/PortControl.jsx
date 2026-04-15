@@ -27,8 +27,7 @@ const PortControl = ({ controlPassword, ports, loading, onRefresh }) => {
             <Network size={18} />
           </span>
           <div>
-            <h2 className="panel-title">Port Control</h2>
-            <p className="panel-subtitle">Inspect listening services and terminate dashboard-owned listeners.</p>
+            <h2 className="panel-title">Ports</h2>
           </div>
         </div>
       </div>
