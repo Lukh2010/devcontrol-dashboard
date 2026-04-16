@@ -37,6 +37,15 @@ class MockEventSource {
         ports: [],
         network_info: { interfaces: {}, default_gateway: 'Unknown', hostname: 'dev-box' }
       });
+      this.emit('action', {
+        action: 'terminal_state',
+        status: 'connected',
+        message: 'Terminal session connected',
+        severity: 'success',
+        entity_type: 'terminal',
+        entity_id: 8003,
+        timestamp: Date.now()
+      });
       this.emit('heartbeat', {});
     }, 0);
   }
@@ -77,7 +86,8 @@ describe('App auth mode rendering', () => {
       if (url.endsWith('/api/auth/status')) {
         return Promise.resolve(new Response(JSON.stringify({
           enabled: true,
-          required: true
+          required: true,
+          session_active: false
         }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
       }
 
@@ -108,6 +118,8 @@ describe('App auth mode rendering', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Control Password')).toBeInTheDocument();
     });
+
+    expect(screen.getByRole('button', { name: 'Unlock' })).toBeInTheDocument();
   });
 
   it('renders live system information from the stream', async () => {
@@ -116,5 +128,8 @@ describe('App auth mode rendering', () => {
     await waitFor(() => {
       expect(screen.getByText('dev-box')).toBeInTheDocument();
     });
+
+    expect(screen.getByText('Recent actions')).toBeInTheDocument();
+    expect(screen.getAllByText('Terminal session connected').length).toBeGreaterThan(0);
   });
 });

@@ -91,7 +91,7 @@ test('hides the password field when password protection is disabled', async ({ p
 
   await expect(page.getByText('no-password-host')).toBeVisible();
   await expect(page.getByLabel('Control Password')).toHaveCount(0);
-  await expect(page.getByRole('complementary').getByText('No Password')).toBeVisible();
+  await expect(page.getByText('No Password').first()).toBeVisible();
 });
 
 test('shows the password field when password protection is enabled', async ({ page }) => {

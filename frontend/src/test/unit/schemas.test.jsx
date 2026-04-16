@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  actionEventSchema,
+  authSessionDeleteSchema,
   authStatusSchema,
   networkInfoSchema,
   performanceSnapshotSchema,
@@ -12,11 +14,22 @@ describe('dashboard schemas', () => {
   it('parses auth status payloads', () => {
     const parsed = authStatusSchema.parse({
       enabled: false,
-      required: false
+      required: false,
+      session_active: false
     });
 
     expect(parsed.enabled).toBe(false);
     expect(parsed.required).toBe(false);
+  });
+
+  it('parses auth session delete payloads without a message', () => {
+    const parsed = authSessionDeleteSchema.parse({
+      success: true,
+      session_active: false
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.session_active).toBe(false);
   });
 
   it('parses performance snapshots', () => {
@@ -79,5 +92,23 @@ describe('dashboard schemas', () => {
     });
 
     expect(parsed.system_info?.hostname).toBe('dev-box');
+  });
+
+  it('parses enriched action events', () => {
+    const parsed = actionEventSchema.parse({
+      action: 'kill_process',
+      status: 'success',
+      message: 'Stopped process 100',
+      severity: 'success',
+      entity_type: 'process',
+      entity_id: 100,
+      retry_after: null,
+      requires_admin: false,
+      requires_password: true,
+      timestamp: 123
+    });
+
+    expect(parsed.entity_type).toBe('process');
+    expect(parsed.severity).toBe('success');
   });
 });

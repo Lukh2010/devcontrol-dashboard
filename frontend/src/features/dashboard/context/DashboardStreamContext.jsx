@@ -25,11 +25,15 @@ const initialState = {
   isAdmin: false,
   terminalState: 'unknown',
   lastAction: null,
+  actionFeed: [],
   lastHeartbeat: null,
   lastUpdate: null,
   streamStatus: 'connecting',
   reconnectAttempt: 0,
-  streamError: null
+  streamError: null,
+  terminalMessage: null,
+  terminalRetryAfter: null,
+  notice: null
 };
 
 export function DashboardStreamProvider({ children }) {
@@ -64,6 +68,33 @@ export function DashboardStreamProvider({ children }) {
     setState((prev) => ({ ...prev, networkInfo: data, lastUpdate: Date.now() }));
     return data;
   }, [queryClient]);
+
+  const recordUiAction = useCallback((action) => {
+    const normalizedAction = {
+      action: action.action || 'ui_event',
+      status: action.status || 'info',
+      message: action.message || 'Interface updated',
+      severity: action.severity || 'neutral',
+      entity_type: action.entity_type || 'ui',
+      entity_id: action.entity_id ?? null,
+      retry_after: action.retry_after ?? null,
+      requires_admin: action.requires_admin ?? false,
+      requires_password: action.requires_password ?? false,
+      timestamp: action.timestamp || Date.now(),
+      ...action
+    };
+
+    setState((prev) => ({
+      ...prev,
+      lastAction: normalizedAction,
+      actionFeed: [normalizedAction, ...prev.actionFeed].slice(0, 10),
+      notice: normalizedAction.severity !== 'neutral' ? normalizedAction : prev.notice
+    }));
+  }, []);
+
+  const dismissNotice = useCallback(() => {
+    setState((prev) => ({ ...prev, notice: null }));
+  }, []);
 
   useEffect(() => {
     let source;
@@ -166,12 +197,25 @@ export function DashboardStreamProvider({ children }) {
           setState((prev) => ({ ...prev, streamError: 'Malformed event: action' }));
           return;
         }
-        setState((prev) => ({
-          ...prev,
-          lastAction: payload,
-          terminalState: payload.action === 'terminal_state' ? payload.status : prev.terminalState,
-          lastUpdate: Date.now()
-        }));
+        setState((prev) => {
+          const normalizedAction = {
+            severity: payload.severity || (payload.status === 'success' ? 'success' : payload.status === 'failed' ? 'danger' : 'warning'),
+            message: payload.message || payload.action,
+            timestamp: payload.timestamp || Date.now(),
+            ...payload
+          };
+
+          return {
+            ...prev,
+            lastAction: normalizedAction,
+            actionFeed: [normalizedAction, ...prev.actionFeed].slice(0, 10),
+            terminalState: payload.action === 'terminal_state' ? payload.status : prev.terminalState,
+            terminalMessage: payload.action === 'terminal_state' ? (payload.message || prev.terminalMessage) : prev.terminalMessage,
+            terminalRetryAfter: payload.action === 'terminal_state' ? (payload.retry_after ?? prev.terminalRetryAfter) : prev.terminalRetryAfter,
+            notice: normalizedAction.severity !== 'neutral' ? normalizedAction : prev.notice,
+            lastUpdate: Date.now()
+          };
+        });
       });
 
       source.onerror = () => {
@@ -216,8 +260,10 @@ export function DashboardStreamProvider({ children }) {
     stale,
     refreshProcesses,
     refreshPorts,
-    refreshNetwork
-  }), [refreshNetwork, refreshPorts, refreshProcesses, stale, state]);
+    refreshNetwork,
+    recordUiAction,
+    dismissNotice
+  }), [dismissNotice, recordUiAction, refreshNetwork, refreshPorts, refreshProcesses, stale, state]);
 
   return (
     <DashboardStreamContext.Provider value={value}>

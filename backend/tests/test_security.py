@@ -97,6 +97,22 @@ def test_require_control_password_accepts_cookie_auth(monkeypatch):
     assert payload["command"] == "echo cookie"
 
 
+def test_auth_status_reports_active_cookie_session(monkeypatch):
+    monkeypatch.setenv("DEVCONTROL_PASSWORD", "secret-123")
+    clear_security_state()
+    app = create_app(FakeRuntime())
+    client = app.test_client()
+    token, _ = create_control_session()
+    client.set_cookie(SESSION_COOKIE_NAME, token)
+
+    response = client.get("/api/auth/status")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["enabled"] is True
+    assert payload["session_active"] is True
+
+
 def test_auth_session_locks_out_after_repeated_failures(monkeypatch):
     monkeypatch.setenv("DEVCONTROL_PASSWORD", "secret-123")
     clear_security_state()

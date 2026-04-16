@@ -2,13 +2,26 @@ import { z } from 'zod';
 
 export const authStatusSchema = z.object({
   enabled: z.boolean(),
-  required: z.boolean()
+  required: z.boolean(),
+  session_active: z.boolean().optional()
 });
 
 export const authValidationSchema = z.object({
   valid: z.boolean(),
   configured: z.boolean(),
-  required: z.boolean().optional()
+  required: z.boolean().optional(),
+  session_active: z.boolean().optional(),
+  message: z.string().optional()
+});
+
+export const authSessionSchema = authValidationSchema.extend({
+  error: z.string().optional()
+});
+
+export const authSessionDeleteSchema = z.object({
+  success: z.boolean(),
+  session_active: z.boolean().optional(),
+  message: z.string().optional()
 });
 
 export const systemInfoSchema = z.object({
@@ -46,7 +59,10 @@ export const portSchema = z.object({
   port: z.number(),
   process_name: z.string(),
   pid: z.number(),
-  status: z.string()
+  status: z.string(),
+  dashboard_owned: z.boolean().optional(),
+  killable: z.boolean().optional(),
+  kill_reason: z.string().nullable().optional()
 });
 
 export const processSchema = z.object({
@@ -54,7 +70,10 @@ export const processSchema = z.object({
   name: z.string(),
   cpu_percent: z.number(),
   memory_mb: z.number(),
-  status: z.string()
+  status: z.string(),
+  dashboard_owned: z.boolean().optional(),
+  killable: z.boolean().optional(),
+  kill_reason: z.string().nullable().optional()
 });
 
 export const networkAddressSchema = z.object({
@@ -72,7 +91,15 @@ export const networkInfoSchema = z.object({
 
 export const actionEventSchema = z.object({
   action: z.string(),
-  status: z.string()
+  status: z.string(),
+  message: z.string().optional(),
+  severity: z.string().optional(),
+  entity_type: z.string().nullable().optional(),
+  entity_id: z.union([z.string(), z.number()]).nullable().optional(),
+  retry_after: z.number().nullable().optional(),
+  requires_admin: z.boolean().optional(),
+  requires_password: z.boolean().optional(),
+  timestamp: z.number().optional()
 }).passthrough();
 
 export const apiMessageSchema = z.object({

@@ -1,7 +1,12 @@
-import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { dashboardQueryKeys, fetchAuthStatus, validatePassword } from '../api/client';
+import {
+  createAuthSession,
+  dashboardQueryKeys,
+  deleteAuthSession,
+  fetchAuthStatus,
+  validatePassword
+} from '../api/client';
 
 export function useAuthStatus() {
   return useQuery({
@@ -11,20 +16,33 @@ export function useAuthStatus() {
 }
 
 export function usePasswordValidation(password, enabled = true) {
-  const [debouncedPassword, setDebouncedPassword] = useState(password);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedPassword(password);
-    }, 600);
-
-    return () => clearTimeout(timer);
-  }, [password]);
-
   return useQuery({
-    queryKey: dashboardQueryKeys.validatePassword(debouncedPassword),
-    queryFn: () => validatePassword(debouncedPassword),
-    enabled: enabled && Boolean(debouncedPassword),
-    staleTime: 0
+    queryKey: dashboardQueryKeys.validatePassword(password),
+    queryFn: () => validatePassword(password),
+    enabled: enabled && Boolean(password),
+    staleTime: 0,
+    retry: false
+  });
+}
+
+export function useCreateAuthSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: createAuthSession,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.authStatus });
+    }
+  });
+}
+
+export function useDeleteAuthSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: deleteAuthSession,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.authStatus });
+    }
   });
 }

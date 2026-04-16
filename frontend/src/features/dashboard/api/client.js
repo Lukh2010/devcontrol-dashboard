@@ -1,6 +1,8 @@
 import {
   apiErrorSchema,
   apiMessageSchema,
+  authSessionDeleteSchema,
+  authSessionSchema,
   authStatusSchema,
   authValidationSchema,
   networkInfoSchema,
@@ -10,12 +12,42 @@ import {
   systemInfoSchema
 } from './schemas';
 
+export class ApiRequestError extends Error {
+  constructor(message, details = {}) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = details.status ?? null;
+    this.retryAfter = details.retryAfter ?? null;
+    this.payload = details.payload ?? null;
+  }
+}
+
+function buildSearchParams(options = {}) {
+  const params = new URLSearchParams();
+
+  Object.entries(options).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '' || value === false) {
+      return;
+    }
+    params.set(key, String(value));
+  });
+
+  const queryString = params.toString();
+  return queryString ? `?${queryString}` : '';
+}
+
 async function parseJson(response) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const parsedError = apiErrorSchema.safeParse(payload);
-    const message = parsedError.success ? parsedError.data.error : `HTTP ${response.status}`;
-    throw new Error(message);
+    const message = parsedError.success
+      ? parsedError.data.error
+      : payload.message || payload.error || `HTTP ${response.status}`;
+    throw new ApiRequestError(message, {
+      status: response.status,
+      retryAfter: payload.retry_after ?? null,
+      payload
+    });
   }
   return payload;
 }
@@ -35,10 +67,13 @@ async function mutateJson(path, options, schema) {
 export const dashboardQueryKeys = {
   authStatus: ['auth-status'],
   validatePassword: (password) => ['auth-validate', password],
+  authSession: ['auth-session'],
   systemInfo: ['system-info'],
   systemPerformance: ['system-performance'],
   processes: ['processes'],
+  processesList: (filters = {}) => ['processes', filters],
   ports: ['ports'],
+  portsList: (filters = {}) => ['ports', filters],
   networkInfo: ['network-info']
 };
 
@@ -56,6 +91,24 @@ export function validatePassword(password) {
   }, authValidationSchema);
 }
 
+export function createAuthSession(password) {
+  return mutateJson('/api/auth/session', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    credentials: 'same-origin',
+    body: JSON.stringify({ password })
+  }, authSessionSchema);
+}
+
+export function deleteAuthSession() {
+  return mutateJson('/api/auth/session', {
+    method: 'DELETE',
+    credentials: 'same-origin'
+  }, authSessionDeleteSchema);
+}
+
 export function fetchSystemInfo() {
   return getJson('/api/system/info', systemInfoSchema);
 }
@@ -64,12 +117,12 @@ export function fetchSystemPerformance() {
   return getJson('/api/system/performance', performanceSnapshotSchema);
 }
 
-export function fetchProcesses() {
-  return getJson('/api/processes', processesSchema);
+export function fetchProcesses(options = {}) {
+  return getJson(`/api/processes${buildSearchParams(options)}`, processesSchema);
 }
 
-export function fetchPorts() {
-  return getJson('/api/ports', portsSchema);
+export function fetchPorts(options = {}) {
+  return getJson(`/api/ports${buildSearchParams(options)}`, portsSchema);
 }
 
 export function fetchNetworkInfo() {

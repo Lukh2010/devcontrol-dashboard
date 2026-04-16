@@ -176,7 +176,7 @@ class DevControlStarter:
             time.sleep(3)
             if self.frontend_process.poll() is None:
                 register_dashboard_pid("frontend", self.frontend_process.pid)
-                print("[OK] Frontend server started on http://localhost:3000")
+                print("[OK] Frontend server started on http://127.0.0.1:3000")
                 return True
 
             print(f"[ERROR] Frontend failed to start with exit code: {self.frontend_process.returncode}")
@@ -187,7 +187,7 @@ class DevControlStarter:
 
     def monitor_processes(self):
         print("\nServers are running. Press Ctrl+C to stop all servers.")
-        print("Dashboard: http://localhost:3000")
+        print("Dashboard: http://127.0.0.1:3000")
         print("Backend API: http://127.0.0.1:8000")
         print("WebSocket Terminal: ws://127.0.0.1:8003")
         print("\nMonitoring server status...")

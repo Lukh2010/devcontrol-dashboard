@@ -7,6 +7,8 @@ import time
 
 import psutil
 
+from dashboard_pids import is_dashboard_pid
+
 
 class TelemetryCollectorService:
     """Collects host telemetry and publishes snapshots onto the event bus."""
@@ -100,6 +102,62 @@ class TelemetryCollectorService:
             "timestamp": time.time()
         }
 
+    def _build_process_entry(self, process_info: dict, is_admin: bool) -> dict:
+        pid = process_info["pid"]
+        dashboard_owned = bool(pid) and is_dashboard_pid(pid)
+        killable = dashboard_owned and (platform.system() != "Windows" or is_admin)
+        kill_reason = None
+
+        if not dashboard_owned:
+            kill_reason = "Not managed by DevControl"
+        elif platform.system() == "Windows" and not is_admin:
+            kill_reason = "Administrator privileges required on Windows"
+
+        return {
+            **process_info,
+            "dashboard_owned": dashboard_owned,
+            "killable": killable,
+            "kill_reason": kill_reason,
+        }
+
+    def _build_port_entry(self, port_info: dict, is_admin: bool) -> dict:
+        pid = port_info["pid"]
+        dashboard_owned = bool(pid) and is_dashboard_pid(pid)
+        killable = dashboard_owned and (platform.system() != "Windows" or is_admin)
+        kill_reason = None
+
+        if not dashboard_owned:
+            kill_reason = "Not managed by DevControl"
+        elif platform.system() == "Windows" and not is_admin:
+            kill_reason = "Administrator privileges required on Windows"
+
+        return {
+            **port_info,
+            "dashboard_owned": dashboard_owned,
+            "killable": killable,
+            "kill_reason": kill_reason,
+        }
+
+    def _sort_processes(self, processes: list[dict], sort: str) -> list[dict]:
+        normalized_sort = (sort or "cpu_desc").lower()
+        if normalized_sort == "memory_desc":
+            return sorted(processes, key=lambda process: (-process["memory_mb"], -process["cpu_percent"], process["pid"]))
+        if normalized_sort == "name_asc":
+            return sorted(processes, key=lambda process: (process["name"].lower(), process["pid"]))
+        if normalized_sort == "pid_asc":
+            return sorted(processes, key=lambda process: process["pid"])
+        if normalized_sort == "status_asc":
+            return sorted(processes, key=lambda process: (process["status"], process["name"].lower(), process["pid"]))
+        return sorted(processes, key=lambda process: (-process["cpu_percent"], -process["memory_mb"], process["pid"]))
+
+    def _sort_ports(self, ports: list[dict], sort: str) -> list[dict]:
+        normalized_sort = (sort or "port_asc").lower()
+        if normalized_sort == "process_asc":
+            return sorted(ports, key=lambda port: (port["process_name"].lower(), port["port"], port["pid"]))
+        if normalized_sort == "pid_asc":
+            return sorted(ports, key=lambda port: (port["pid"], port["port"]))
+        return sorted(ports, key=lambda port: (port["port"], port["pid"]))
+
     def _update_cpu_cache(self):
         current_time = time.time()
         if current_time - self._last_cpu_update < 1.0:
@@ -136,8 +194,17 @@ class TelemetryCollectorService:
         except Exception as exc:
             print(f"Error updating CPU cache: {exc}")
 
-    def collect_processes(self):
+    def collect_processes(
+        self,
+        search: str = "",
+        sort: str = "cpu_desc",
+        limit: int | None = 15,
+        dashboard_only: bool = False,
+        killable_only: bool = False,
+    ):
         self._update_cpu_cache()
+        is_admin = self.collect_is_admin()
+        normalized_search = (search or "").strip().lower()
         processes = []
         for proc in psutil.process_iter(["pid", "name", "memory_info", "status"]):
             try:
@@ -145,37 +212,68 @@ class TelemetryCollectorService:
                 cpu_percent = self._cpu_cache.get(proc.pid, 0.0) if self._cpu_cache_ready else 0.0
                 memory_mb = pinfo["memory_info"].rss / 1024 / 1024 if pinfo["memory_info"] else 0
                 if pinfo["name"] and pinfo["name"] != "System Idle Process":
-                    processes.append({
+                    process_entry = self._build_process_entry({
                         "pid": pinfo["pid"],
                         "name": pinfo["name"] or "Unknown",
                         "cpu_percent": round(cpu_percent, 2),
                         "memory_mb": round(memory_mb, 2),
                         "status": pinfo["status"]
-                    })
+                    }, is_admin)
+
+                    if dashboard_only and not process_entry["dashboard_owned"]:
+                        continue
+                    if killable_only and not process_entry["killable"]:
+                        continue
+                    if normalized_search and normalized_search not in process_entry["name"].lower() and normalized_search not in str(process_entry["pid"]):
+                        continue
+
+                    processes.append(process_entry)
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
-        processes.sort(
-            key=lambda process: (-process["cpu_percent"], -process["memory_mb"], process["pid"])
-        )
-        return processes[:15]
+        sorted_processes = self._sort_processes(processes, sort)
+        if limit is None or limit <= 0:
+            return sorted_processes
+        return sorted_processes[:limit]
 
-    def collect_ports(self):
+    def collect_ports(
+        self,
+        search: str = "",
+        sort: str = "port_asc",
+        limit: int | None = 100,
+        dashboard_only: bool = False,
+        killable_only: bool = False,
+    ):
         connections = {}
+        normalized_search = (search or "").strip().lower()
+        is_admin = self.collect_is_admin()
         for conn in psutil.net_connections():
             if conn.status == "LISTEN":
                 try:
                     process = psutil.Process(conn.pid) if conn.pid else None
                     if process:
                         key = (conn.laddr.port, conn.pid, process.name())
-                        connections[key] = {
+                        port_entry = self._build_port_entry({
                             "port": conn.laddr.port,
                             "process_name": process.name(),
                             "pid": conn.pid,
                             "status": conn.status
-                        }
+                        }, is_admin)
+
+                        if dashboard_only and not port_entry["dashboard_owned"]:
+                            continue
+                        if killable_only and not port_entry["killable"]:
+                            continue
+                        searchable = f"{port_entry['port']} {port_entry['process_name']} {port_entry['pid']}".lower()
+                        if normalized_search and normalized_search not in searchable:
+                            continue
+
+                        connections[key] = port_entry
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
-        return sorted(connections.values(), key=lambda conn: (conn["port"], conn["pid"]))
+        sorted_ports = self._sort_ports(list(connections.values()), sort)
+        if limit is None or limit <= 0:
+            return sorted_ports
+        return sorted_ports[:limit]
 
     def collect_network_info(self):
         network_info = {}
@@ -233,10 +331,10 @@ class TelemetryCollectorService:
         }
 
     def collect_process_snapshot(self):
-        return {"processes": self.collect_processes()}
+        return {"processes": self.collect_processes(limit=25)}
 
     def collect_network_snapshot(self):
         return {
-            "ports": self.collect_ports(),
+            "ports": self.collect_ports(limit=25),
             "network_info": self.collect_network_info()
         }

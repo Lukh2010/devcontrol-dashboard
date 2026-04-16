@@ -16,6 +16,7 @@ from security import (
     consume_rate_limit,
     get_rate_limit_status,
     has_valid_control_session,
+    is_password_protection_enabled,
     register_failed_attempt,
     verify_control_password
 )
@@ -44,7 +45,14 @@ class TerminalGatewayService:
                     "reason": "rate_limited",
                     "retry_after": retry_after
                 }))
-                self._publish_terminal_state("rate_limited", reason="too_many_requests", retry_after=retry_after)
+                self._publish_terminal_state(
+                    "rate_limited",
+                    message=RATE_LIMITED_MESSAGE,
+                    severity="warning",
+                    retry_after=retry_after,
+                    reason="too_many_requests",
+                    requires_password=is_password_protection_enabled(),
+                )
                 await websocket.close(code=4429, reason="Rate limited")
                 return
 
@@ -57,7 +65,14 @@ class TerminalGatewayService:
             session_token = session_cookie.value if session_cookie else ""
             provided_password = websocket.request_headers.get("X-DevControl-Password", "")
 
-            if not has_valid_control_session(session_token) and not verify_control_password(provided_password):
+            password_enabled = is_password_protection_enabled()
+            authorized = (
+                not password_enabled
+                or has_valid_control_session(session_token)
+                or verify_control_password(provided_password)
+            )
+
+            if not authorized:
                 register_failed_attempt("terminal_handshake", client_ip)
                 allowed_after_failure, failure_retry_after = get_rate_limit_status("terminal_handshake", client_ip)
                 await websocket.send(json.dumps({
@@ -66,13 +81,26 @@ class TerminalGatewayService:
                     "reason": "unauthorized",
                     **({"retry_after": failure_retry_after} if not allowed_after_failure else {})
                 }))
-                self._publish_terminal_state("unauthorized", reason="invalid_password")
+                self._publish_terminal_state(
+                    "unauthorized",
+                    message=PROTECTED_ENDPOINTS_MESSAGE,
+                    severity="danger",
+                    reason="invalid_password",
+                    retry_after=failure_retry_after if not allowed_after_failure else None,
+                    requires_password=True,
+                )
                 await websocket.close(code=4401, reason="Unauthorized")
                 return
 
             clear_failed_attempts("terminal_handshake", client_ip)
             session_id = await self.terminal_manager.create_session(websocket)
-            self._publish_terminal_state("connected", session_id=session_id)
+            self._publish_terminal_state(
+                "connected",
+                message="Terminal session connected",
+                severity="success",
+                session_id=session_id,
+                requires_password=password_enabled,
+            )
 
             async for message in websocket:
                 try:
@@ -96,7 +124,12 @@ class TerminalGatewayService:
         finally:
             if "session_id" in locals():
                 await self.terminal_manager.close_session(session_id)
-                self._publish_terminal_state("disconnected", session_id=session_id)
+                self._publish_terminal_state(
+                    "disconnected",
+                    message="Terminal session disconnected",
+                    severity="neutral",
+                    session_id=session_id,
+                )
 
     def start(self):
         with self._thread_lock:
@@ -117,7 +150,11 @@ class TerminalGatewayService:
             self.event_bus.publish("action", {
                 "action": "terminal_server",
                 "status": "ready",
-                "port": self.port
+                "message": f"Terminal gateway ready on 127.0.0.1:{self.port}",
+                "severity": "success",
+                "entity_type": "terminal_server",
+                "entity_id": self.port,
+                "port": self.port,
             })
             print(f"WebSocket terminal server started on ws://localhost:{self.port}")
             loop.run_forever()
@@ -126,6 +163,10 @@ class TerminalGatewayService:
             self.event_bus.publish("action", {
                 "action": "terminal_server",
                 "status": "unavailable",
+                "message": message,
+                "severity": "danger",
+                "entity_type": "terminal_server",
+                "entity_id": self.port,
                 "port": self.port,
                 "reason": message
             })
@@ -134,10 +175,14 @@ class TerminalGatewayService:
             else:
                 raise
 
-    def _publish_terminal_state(self, status, **details):
+    def _publish_terminal_state(self, status, message: str | None = None, severity: str | None = None, **details):
         self.event_bus.publish("action", {
             "action": "terminal_state",
             "status": status,
+            "message": message or f"Terminal {status}",
+            "severity": severity or ("success" if status == "connected" else "warning"),
+            "entity_type": "terminal",
+            "entity_id": self.port,
             **details
         })
 

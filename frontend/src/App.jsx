@@ -6,70 +6,41 @@ import {
   HardDrive,
   LockKeyhole,
   Network,
+  RefreshCw,
   Shield,
   Terminal,
   Wifi
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
+import ActionFeed from './components/ActionFeed';
+import AttentionPanel from './components/AttentionPanel';
 import NetworkHub from './components/NetworkHub';
-import OverviewHighlights from './components/OverviewHighlights';
 import PortControl from './components/PortControl';
 import ProcessManager from './components/ProcessManager';
 import SystemMonitor from './components/SystemMonitor';
+import SystemReadiness from './components/SystemReadiness';
+import ToastViewport from './components/ToastViewport';
 import WindowTerminal from './components/WindowTerminal';
 import { DashboardStreamProvider, useDashboardStream } from './features/dashboard/context/DashboardStreamContext';
-import { useAuthStatus, usePasswordValidation } from './features/dashboard/hooks/useAuthStatus';
+import { useAuthStatus, useCreateAuthSession, useDeleteAuthSession } from './features/dashboard/hooks/useAuthStatus';
+
+const PANEL_STORAGE_KEY = 'devcontrol.activePanel';
 
 const PANELS = [
-  {
-    id: 'overview',
-    label: 'Overview',
-    icon: Activity
-  },
-  {
-    id: 'ports',
-    label: 'Ports',
-    icon: Network
-  },
-  {
-    id: 'process-manager',
-    label: 'Processes',
-    icon: Cpu
-  },
-  {
-    id: 'commands',
-    label: 'Terminal',
-    icon: Terminal
-  },
-  {
-    id: 'network',
-    label: 'Network',
-    icon: Wifi
-  }
+  { id: 'overview', label: 'Overview', icon: Activity },
+  { id: 'ports', label: 'Ports', icon: Network },
+  { id: 'process-manager', label: 'Processes', icon: Cpu },
+  { id: 'commands', label: 'Terminal', icon: Terminal },
+  { id: 'network', label: 'Network', icon: Wifi }
 ];
 
 const PANEL_TITLES = {
-  overview: {
-    title: 'Overview',
-    subtitle: 'Live telemetry and status.'
-  },
-  ports: {
-    title: 'Ports',
-    subtitle: 'Listening services.'
-  },
-  'process-manager': {
-    title: 'Processes',
-    subtitle: 'CPU-heavy tasks.'
-  },
-  commands: {
-    title: 'Terminal',
-    subtitle: 'Protected command access.'
-  },
-  network: {
-    title: 'Network',
-    subtitle: 'Interfaces and gateway.'
-  }
+  overview: { title: 'Overview', subtitle: 'Readiness, attention points and live action feedback.' },
+  ports: { title: 'Ports', subtitle: 'Filter and stop only managed listeners.' },
+  'process-manager': { title: 'Processes', subtitle: 'Search and control dashboard-managed processes.' },
+  commands: { title: 'Terminal', subtitle: 'Guided command execution with explicit terminal states.' },
+  network: { title: 'Network', subtitle: 'Interfaces, gateway and connectivity overview.' }
 };
 
 function formatClock(date) {
@@ -100,10 +71,70 @@ function formatBytesToGb(value) {
   return `${Math.round(value / 1024 / 1024 / 1024)} GB`;
 }
 
+function getTerminalReadiness({ terminalState, terminalMessage, authUnlocked, passwordProtectionEnabled }) {
+  if (passwordProtectionEnabled && !authUnlocked) {
+    return {
+      tone: 'status-warning',
+      label: 'Locked',
+      summary: 'Unlock control access to start a terminal session.',
+      hint: 'The terminal uses the same control session as protected actions.',
+      attention: false
+    };
+  }
+
+  if (terminalState === 'connected') {
+    return {
+      tone: 'status-success',
+      label: 'Live',
+      summary: 'Terminal session connected.',
+      hint: terminalMessage || 'The terminal is open and ready for commands.',
+      attention: false
+    };
+  }
+
+  if (terminalState === 'rate_limited') {
+    return {
+      tone: 'status-warning',
+      label: 'Retry',
+      summary: terminalMessage || 'Terminal access is temporarily rate limited.',
+      hint: 'Wait for the retry window before opening a new session.',
+      attention: true
+    };
+  }
+
+  if (terminalState === 'unauthorized' || terminalState === 'session_expired') {
+    return {
+      tone: 'status-warning',
+      label: 'Unlock',
+      summary: terminalMessage || 'The terminal needs a fresh control session.',
+      hint: 'Unlock control access again to open a new session.',
+      attention: true
+    };
+  }
+
+  if (terminalState === 'gateway_down' || terminalState === 'unavailable') {
+    return {
+      tone: 'status-danger',
+      label: 'Down',
+      summary: terminalMessage || 'The terminal gateway is unavailable.',
+      hint: 'Check the backend and the WebSocket gateway on 127.0.0.1:8003.',
+      attention: true
+    };
+  }
+
+  return {
+    tone: 'status-neutral',
+    label: 'Idle',
+    summary: 'Open the Terminal tab to start a session.',
+    hint: 'No active terminal session is running right now.',
+    attention: false
+  };
+}
+
 function AppContent() {
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [activePanel, setActivePanel] = useState('overview');
-  const [controlPassword, setControlPassword] = useState('');
+  const [activePanel, setActivePanel] = useState(() => window.localStorage.getItem(PANEL_STORAGE_KEY) || 'overview');
+  const [passwordInput, setPasswordInput] = useState('');
 
   const {
     systemInfo,
@@ -113,43 +144,29 @@ function AppContent() {
     networkInfo,
     isAdmin,
     terminalState,
+    terminalMessage,
     streamStatus,
     reconnectAttempt,
     streamError,
     stale,
     lastHeartbeat,
-    lastAction,
+    actionFeed,
+    notice,
     refreshProcesses,
-    refreshPorts
+    refreshPorts,
+    refreshNetwork,
+    recordUiAction,
+    dismissNotice
   } = useDashboardStream();
 
   const authStatusQuery = useAuthStatus();
+  const createAuthSessionMutation = useCreateAuthSession();
+  const deleteAuthSessionMutation = useDeleteAuthSession();
+
   const passwordProtectionEnabled = authStatusQuery.data?.enabled ?? true;
-  const passwordValidationQuery = usePasswordValidation(controlPassword, passwordProtectionEnabled);
-
-  const authState = useMemo(() => {
-    if (!passwordProtectionEnabled) {
-      return 'disabled';
-    }
-    if (!controlPassword) {
-      return 'idle';
-    }
-    if (passwordValidationQuery.isLoading || passwordValidationQuery.isFetching) {
-      return 'checking';
-    }
-    if (passwordValidationQuery.isError) {
-      return 'error';
-    }
-
-    return passwordValidationQuery.data?.valid ? 'valid' : 'invalid';
-  }, [
-    controlPassword,
-    passwordProtectionEnabled,
-    passwordValidationQuery.data?.valid,
-    passwordValidationQuery.isError,
-    passwordValidationQuery.isFetching,
-    passwordValidationQuery.isLoading
-  ]);
+  const authUnlocked = !passwordProtectionEnabled || Boolean(authStatusQuery.data?.session_active);
+  const authMutationError = createAuthSessionMutation.error;
+  const authRetryAfter = authMutationError?.retryAfter ?? null;
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -157,60 +174,91 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
+    window.localStorage.setItem(PANEL_STORAGE_KEY, activePanel);
+  }, [activePanel]);
+
+  useEffect(() => {
+    if (!notice) {
+      return undefined;
+    }
+
+    const timer = setTimeout(() => dismissNotice(), 4800);
+    return () => clearTimeout(timer);
+  }, [dismissNotice, notice]);
+
+  useEffect(() => {
     if (!passwordProtectionEnabled) {
-      setControlPassword('');
+      setPasswordInput('');
     }
   }, [passwordProtectionEnabled]);
 
-  useEffect(() => {
-    let cancelled = false;
+  const unlockControl = async () => {
+    if (!passwordInput.trim()) {
+      recordUiAction({
+        action: 'auth_session',
+        status: 'blocked',
+        message: 'Enter the control password before unlocking.',
+        severity: 'warning',
+        entity_type: 'auth'
+      });
+      return;
+    }
 
-    const syncSession = async () => {
-      if (!passwordProtectionEnabled || !controlPassword || !passwordValidationQuery.data?.valid) {
-        await fetch('/api/auth/session', {
-          method: 'DELETE',
-          credentials: 'same-origin'
-        }).catch(() => {});
-        return;
-      }
+    try {
+      const result = await createAuthSessionMutation.mutateAsync(passwordInput.trim());
+      recordUiAction({
+        action: 'auth_session',
+        status: 'success',
+        message: result.message || 'Control session unlocked.',
+        severity: 'success',
+        entity_type: 'auth'
+      });
+    } catch (error) {
+      recordUiAction({
+        action: 'auth_session',
+        status: error.status === 429 ? 'rate_limited' : 'failed',
+        message: error.status === 429
+          ? `Too many unlock attempts. Retry in ${error.retryAfter}s.`
+          : error.message,
+        severity: error.status === 429 ? 'warning' : 'danger',
+        entity_type: 'auth',
+        retry_after: error.retryAfter ?? null,
+        requires_password: true
+      });
+    }
+  };
 
-      try {
-        const response = await fetch('/api/auth/session', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          credentials: 'same-origin',
-          body: JSON.stringify({ password: controlPassword })
-        });
+  const lockControl = async () => {
+    try {
+      await deleteAuthSessionMutation.mutateAsync();
+      recordUiAction({
+        action: 'auth_session',
+        status: 'success',
+        message: 'Control session locked.',
+        severity: 'neutral',
+        entity_type: 'auth'
+      });
+    } catch (error) {
+      recordUiAction({
+        action: 'auth_session',
+        status: 'failed',
+        message: error.message,
+        severity: 'danger',
+        entity_type: 'auth'
+      });
+    }
+  };
 
-        if (!response.ok && !cancelled) {
-          setControlPassword('');
-        }
-      } catch {
-        if (!cancelled) {
-          setControlPassword('');
-        }
-      }
-    };
-
-    void syncSession();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [controlPassword, passwordProtectionEnabled, passwordValidationQuery.data?.valid]);
-
-  const authBadge = authState === 'disabled'
+  const authBadge = !passwordProtectionEnabled
     ? { tone: 'status-neutral', label: 'No Password' }
-    : authState === 'valid'
+    : authUnlocked
       ? { tone: 'status-success', label: 'Unlocked' }
-      : authState === 'checking'
-        ? { tone: 'status-warning', label: 'Checking' }
-        : authState === 'invalid'
-          ? { tone: 'status-danger', label: 'Rejected' }
-          : authState === 'error'
-            ? { tone: 'status-danger', label: 'Offline' }
+      : createAuthSessionMutation.isPending
+        ? { tone: 'status-warning', label: 'Unlocking' }
+        : authRetryAfter
+          ? { tone: 'status-warning', label: `Retry in ${authRetryAfter}s` }
+          : authStatusQuery.isError
+            ? { tone: 'status-danger', label: 'Auth offline' }
             : { tone: 'status-warning', label: 'Locked' };
 
   const streamBadge = streamStatus === 'connected'
@@ -219,19 +267,28 @@ function AppContent() {
 
   const terminalBadge = terminalState === 'connected'
     ? { tone: 'status-success', label: 'Terminal ready' }
-    : { tone: 'status-neutral', label: 'Terminal idle' };
+    : terminalState === 'rate_limited'
+      ? { tone: 'status-warning', label: 'Rate limited' }
+      : terminalState === 'unauthorized'
+        ? { tone: 'status-danger', label: 'Terminal locked' }
+        : { tone: 'status-neutral', label: 'Terminal idle' };
 
-  const passwordHint = authState === 'disabled'
-    ? 'Protection disabled for this session.'
-    : authState === 'valid'
-      ? 'Protected actions unlocked.'
-      : authState === 'checking'
-        ? 'Validating password.'
-        : authState === 'invalid'
-          ? 'Password does not match.'
-          : authState === 'error'
-            ? 'Validation unavailable.'
-            : 'Enter the startup password.';
+  const authHint = !passwordProtectionEnabled
+    ? 'Password protection is disabled for this session.'
+    : authUnlocked
+      ? 'Protected actions use the active control session cookie.'
+      : authRetryAfter
+        ? `Unlock temporarily rate limited. Retry in about ${authRetryAfter}s.`
+        : authMutationError
+          ? authMutationError.message
+          : 'Unlock once to enable process, port and terminal actions.';
+
+  const terminalReadiness = useMemo(() => getTerminalReadiness({
+    terminalState,
+    terminalMessage,
+    authUnlocked,
+    passwordProtectionEnabled
+  }), [authUnlocked, passwordProtectionEnabled, terminalMessage, terminalState]);
 
   const quickStats = [
     {
@@ -260,23 +317,112 @@ function AppContent() {
     }
   ];
 
-  const telemetryCards = [
+  const readinessItems = [
     {
-      label: 'CPU load',
-      value: performanceData ? `${performanceData.cpu_percent.toFixed(1)}%` : '...',
-      progress: performanceData?.cpu_percent ?? 0
+      label: 'Backend',
+      badgeTone: systemInfo ? 'status-success' : 'status-warning',
+      badgeLabel: systemInfo ? 'Ready' : 'Waiting',
+      summary: systemInfo ? `API live on 127.0.0.1:8000` : 'Waiting for bootstrap snapshot',
+      hint: streamError || 'Flask API and telemetry bootstrap.'
     },
     {
-      label: 'Memory pressure',
-      value: performanceData ? `${performanceData.memory.percent.toFixed(1)}%` : '...',
-      progress: performanceData?.memory.percent ?? 0
+      label: 'Live stream',
+      badgeTone: streamBadge.tone,
+      badgeLabel: streamBadge.label,
+      summary: stale ? 'Stream data is stale.' : 'SSE snapshots are current.',
+      hint: `Heartbeat ${formatLastSeen(lastHeartbeat)}`
     },
     {
-      label: 'Disk usage',
-      value: performanceData ? `${performanceData.disk.percent.toFixed(1)}%` : '...',
-      progress: performanceData?.disk.percent ?? 0
+      label: 'Terminal',
+      badgeTone: terminalReadiness.tone,
+      badgeLabel: terminalReadiness.label,
+      summary: terminalReadiness.summary,
+      hint: terminalReadiness.hint
+    },
+    {
+      label: 'Auth',
+      badgeTone: authBadge.tone,
+      badgeLabel: authBadge.label,
+      summary: authUnlocked ? 'Control session is active.' : 'Protected actions are locked.',
+      hint: authHint
+    },
+    {
+      label: 'Admin',
+      badgeTone: isAdmin ? 'status-success' : 'status-warning',
+      badgeLabel: isAdmin ? 'Available' : 'Limited',
+      summary: isAdmin ? 'Windows admin actions are available.' : 'Process termination may be blocked.',
+      hint: 'Only dashboard-owned processes and ports remain killable.'
     }
   ];
+
+  const attentionItems = useMemo(() => {
+    const items = [];
+
+    if (performanceData?.cpu_percent >= 85) {
+      items.push({
+        title: 'CPU pressure is high',
+        description: `CPU usage is ${performanceData.cpu_percent.toFixed(1)}%. Inspect the process list for hot tasks.`,
+        severity: 'danger',
+        label: 'Critical'
+      });
+    }
+
+    if (stale) {
+      items.push({
+        title: 'Telemetry stream is stale',
+        description: 'The last live update is older than expected. Refresh the affected views or inspect the backend.',
+        severity: 'warning',
+        label: 'Warning'
+      });
+    }
+
+    if (passwordProtectionEnabled && !authUnlocked) {
+      items.push({
+        title: 'Protected actions are locked',
+        description: authHint,
+        severity: 'warning',
+        label: 'Action needed'
+      });
+    }
+
+    if (!isAdmin) {
+      items.push({
+        title: 'Admin privileges missing',
+        description: 'Process termination on Windows needs Administrator mode even for dashboard-owned processes.',
+        severity: 'warning',
+        label: 'Limited'
+      });
+    }
+
+    if (terminalReadiness.attention) {
+      items.push({
+        title: 'Terminal needs attention',
+        description: terminalReadiness.summary,
+        severity: terminalReadiness.tone === 'status-danger' ? 'danger' : 'warning',
+        label: terminalReadiness.label
+      });
+    }
+
+    return items.slice(0, 4);
+  }, [authHint, authUnlocked, isAdmin, passwordProtectionEnabled, performanceData?.cpu_percent, stale, terminalReadiness]);
+
+  const refreshAll = async () => {
+    await Promise.allSettled([
+      refreshProcesses(),
+      refreshPorts(),
+      refreshNetwork(),
+      authStatusQuery.refetch()
+    ]);
+    recordUiAction({
+      action: 'refresh_all',
+      status: 'success',
+      message: 'Requested a full dashboard refresh.',
+      severity: 'neutral',
+      entity_type: 'dashboard'
+    });
+  };
+
+  const heroAttention = attentionItems.slice(0, 3);
 
   const panelMeta = PANEL_TITLES[activePanel];
 
@@ -292,16 +438,17 @@ function AppContent() {
           transition={{ duration: 0.24, ease: 'easeOut' }}
         >
           <SystemMonitor performanceData={performanceData} />
-          <OverviewHighlights
-            systemInfo={systemInfo}
-            processes={processes}
-            ports={ports}
-            networkInfo={networkInfo}
-            streamStatus={streamStatus}
-            terminalState={terminalState}
-            isAdmin={isAdmin}
-            stale={stale}
+          <AttentionPanel
+            items={attentionItems}
+            actions={[
+              { label: 'Open Processes', onClick: () => setActivePanel('process-manager') },
+              { label: 'Open Ports', onClick: () => setActivePanel('ports') },
+              { label: 'Open Terminal', onClick: () => setActivePanel('commands') },
+              { label: 'Refresh all', onClick: () => { void refreshAll(); } }
+            ]}
           />
+          <SystemReadiness items={readinessItems} />
+          <ActionFeed actions={actionFeed} />
         </motion.div>
       );
     }
@@ -317,10 +464,12 @@ function AppContent() {
           transition={{ duration: 0.24, ease: 'easeOut' }}
         >
           <PortControl
-            controlPassword={controlPassword}
+            authUnlocked={authUnlocked}
+            passwordProtectionEnabled={passwordProtectionEnabled}
             ports={ports}
             loading={!ports?.length && streamStatus !== 'connected'}
             onRefresh={refreshPorts}
+            onAction={recordUiAction}
           />
         </motion.div>
       );
@@ -337,11 +486,13 @@ function AppContent() {
           transition={{ duration: 0.24, ease: 'easeOut' }}
         >
           <ProcessManager
-            controlPassword={controlPassword}
+            authUnlocked={authUnlocked}
+            passwordProtectionEnabled={passwordProtectionEnabled}
             processes={processes}
             loading={!processes?.length && streamStatus !== 'connected'}
             isAdmin={isAdmin}
             onRefresh={refreshProcesses}
+            onAction={recordUiAction}
           />
         </motion.div>
       );
@@ -357,7 +508,11 @@ function AppContent() {
           exit={{ opacity: 0, y: -12 }}
           transition={{ duration: 0.24, ease: 'easeOut' }}
         >
-          <WindowTerminal controlPassword={controlPassword} />
+          <WindowTerminal
+            authUnlocked={authUnlocked}
+            passwordProtectionEnabled={passwordProtectionEnabled}
+            onAction={recordUiAction}
+          />
         </motion.div>
       );
     }
@@ -380,165 +535,169 @@ function AppContent() {
   };
 
   return (
-    <motion.div
-      className="app-shell"
-      initial={{ opacity: 0, y: 24 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: 'easeOut' }}
-    >
-      <section className="hero-panel panel">
-        <div className="hero-copy">
-          <span className="hero-kicker">DevControl dashboard</span>
-          <h1 className="hero-title">Modern control surface for your local machine.</h1>
-          <div className="hero-badges">
-            <span className={`status-badge ${authBadge.tone}`}>{authBadge.label}</span>
-            <span className={`status-badge ${streamBadge.tone}`}>{streamBadge.label}</span>
-            <span className={`status-badge ${terminalBadge.tone}`}>{terminalBadge.label}</span>
-          </div>
-        </div>
-
-        <div className="hero-aside">
-          <div className="hero-clock">{formatClock(currentTime)}</div>
-          <div className="hero-meta">Heartbeat {formatLastSeen(lastHeartbeat)}</div>
-          <div className="hero-meta">
-            {stale ? 'Telemetry needs refresh' : 'Telemetry pipeline is healthy'}
-          </div>
-          {lastAction ? (
-            <div className="hero-meta">
-              Last action: {lastAction.action} / {lastAction.status}
+    <>
+      <motion.div
+        className="app-shell"
+        initial={{ opacity: 0, y: 24 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, ease: 'easeOut' }}
+      >
+        <section className="hero-panel panel">
+          <div className="hero-copy">
+            <span className="hero-kicker">DevControl dashboard</span>
+            <h1 className="hero-title">Local control surface with clear trust signals.</h1>
+            <div className="hero-badges">
+              <span className={`status-badge ${authBadge.tone}`}>{authBadge.label}</span>
+              <span className={`status-badge ${streamBadge.tone}`}>{streamBadge.label}</span>
+              <span className={`status-badge ${terminalBadge.tone}`}>{terminalBadge.label}</span>
             </div>
-          ) : null}
-        </div>
-      </section>
+            <div className="hero-attention-list">
+              {heroAttention.length ? heroAttention.map((item) => (
+                <div key={item.title} className="hero-attention-item">
+                  <span className={`status-badge status-${item.severity}`}>{item.label}</span>
+                  <span>{item.description}</span>
+                </div>
+              )) : (
+                <div className="hero-attention-item">
+                  <span className="status-badge status-success">Stable</span>
+                  <span>No urgent issues detected across auth, terminal and telemetry.</span>
+                </div>
+              )}
+            </div>
+          </div>
 
-      <section className="dashboard-grid">
-        <aside className="sidebar-stack">
-          <section className="panel control-panel">
-            <div className="panel-header compact-header">
-              <div className="panel-title-wrap">
-                <span className="panel-icon">
-                  <LockKeyhole size={18} />
-                </span>
-                <div>
-                  <h2 className="panel-title">Control access</h2>
+          <div className="hero-aside">
+            <div className="hero-clock">{formatClock(currentTime)}</div>
+            <div className="hero-meta">Heartbeat {formatLastSeen(lastHeartbeat)}</div>
+            <div className="hero-meta">
+              {stale ? 'Telemetry needs refresh' : 'Telemetry pipeline is healthy'}
+            </div>
+            <div className="hero-meta">UI and launch output now use `127.0.0.1` consistently.</div>
+          </div>
+        </section>
+
+        <section className="dashboard-grid">
+          <aside className="sidebar-stack">
+            <section className="panel control-panel">
+              <div className="panel-header compact-header">
+                <div className="panel-title-wrap">
+                  <span className="panel-icon">
+                    <LockKeyhole size={18} />
+                  </span>
+                  <div>
+                    <h2 className="panel-title">Control access</h2>
+                    <p className="panel-subtitle">Unlock once, then use the same control session everywhere.</p>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="panel-body stack">
-              <AnimatePresence initial={false}>
+              <div className="panel-body stack">
                 {passwordProtectionEnabled ? (
-                  <motion.div
-                    key="password"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.2, ease: 'easeOut' }}
-                  >
+                  <div className="unlock-form">
                     <label className="field-label" htmlFor="control-password">Control Password</label>
                     <input
                       id="control-password"
                       className="input"
                       type="password"
-                      value={controlPassword}
-                      onChange={(event) => setControlPassword(event.target.value)}
+                      value={passwordInput}
+                      onChange={(event) => setPasswordInput(event.target.value)}
                       placeholder="Enter startup password"
                     />
-                  </motion.div>
-                ) : null}
-              </AnimatePresence>
-
-              <div className="glass-note">
-                <span className={`status-badge ${authBadge.tone}`}>{authBadge.label}</span>
-                <p>{streamError || passwordHint}</p>
-              </div>
-
-              <div className="stat-grid">
-                {quickStats.map(({ label, value, hint, icon: Icon }) => (
-                  <div key={label} className="mini-card stat-card">
-                    <div className="stat-card-top">
-                      <span className="panel-icon small-icon">
-                        <Icon size={15} />
-                      </span>
-                      <span className="metric-eyebrow">{label}</span>
+                    <div className="quick-action-row">
+                      <button
+                        className="button"
+                        type="button"
+                        onClick={() => { void unlockControl(); }}
+                        disabled={createAuthSessionMutation.isPending}
+                      >
+                        {createAuthSessionMutation.isPending ? 'Unlocking...' : 'Unlock'}
+                      </button>
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={() => { void lockControl(); }}
+                        disabled={!authUnlocked || deleteAuthSessionMutation.isPending}
+                      >
+                        Lock
+                      </button>
                     </div>
-                    <p className="metric-reading compact-reading">{value}</p>
-                    <p className="muted-note">{hint}</p>
                   </div>
-                ))}
-              </div>
-            </div>
-          </section>
+                ) : null}
 
-          <section className="panel">
-            <div className="panel-header compact-header">
-              <div className="panel-title-wrap">
-                <span className="panel-icon">
-                  <Activity size={18} />
-                </span>
+                <div className="glass-note">
+                  <span className={`status-badge ${authBadge.tone}`}>{authBadge.label}</span>
+                  <p>{streamError || authHint}</p>
+                </div>
+
+                <div className="stat-grid">
+                  {quickStats.map(({ label, value, hint, icon: Icon }) => (
+                    <div key={label} className="mini-card stat-card">
+                      <div className="stat-card-top">
+                        <span className="panel-icon small-icon">
+                          <Icon size={15} />
+                        </span>
+                        <span className="metric-eyebrow">{label}</span>
+                      </div>
+                      <p className="metric-reading compact-reading">{value}</p>
+                      <p className="muted-note">{hint}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <SystemReadiness items={readinessItems} />
+          </aside>
+
+          <main className="workspace-stack">
+            <section className="panel nav-panel">
+              <div className="panel-header compact-header">
                 <div>
-                  <h2 className="panel-title">Telemetry pulse</h2>
+                  <h2 className="panel-title">{panelMeta.title}</h2>
+                  <p className="panel-subtitle">{panelMeta.subtitle}</p>
+                </div>
+                <div className="chip-row">
+                  <span className={`status-badge ${streamBadge.tone}`}>{streamBadge.label}</span>
+                  <span className={`status-badge ${isAdmin ? 'status-success' : 'status-warning'}`}>
+                    {isAdmin ? 'Admin' : 'User mode'}
+                  </span>
+                  <button className="ghost-button compact-action-button" type="button" onClick={() => { void refreshAll(); }}>
+                    <RefreshCw size={16} />
+                    Refresh all
+                  </button>
                 </div>
               </div>
-            </div>
-            <div className="panel-body stack">
-              {telemetryCards.map((card) => (
-                <div key={card.label} className="telemetry-card">
-                  <div className="telemetry-card-row">
-                    <span className="metric-eyebrow">{card.label}</span>
-                    <span className="telemetry-value">{card.value}</span>
-                  </div>
-                  <div className="progress-track strong-track">
-                    <div className="progress-fill" style={{ width: `${card.progress}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        </aside>
 
-        <main className="workspace-stack">
-          <section className="panel nav-panel">
-            <div className="panel-header compact-header">
-              <div>
-                <h2 className="panel-title">{panelMeta.title}</h2>
-                <p className="panel-subtitle">{panelMeta.subtitle}</p>
+              <div className="panel-body">
+                <nav className="nav-grid" aria-label="Dashboard navigation">
+                  {PANELS.map(({ id, label, icon: Icon }) => (
+                    <motion.button
+                      key={id}
+                      type="button"
+                      className={`nav-card ${activePanel === id ? 'active' : ''}`}
+                      onClick={() => setActivePanel(id)}
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.99 }}
+                    >
+                      <span className="panel-icon nav-icon">
+                        <Icon size={16} />
+                      </span>
+                      <span className="nav-card-label">{label}</span>
+                    </motion.button>
+                  ))}
+                </nav>
               </div>
-              <div className="chip-row">
-                <span className={`status-badge ${streamBadge.tone}`}>{streamBadge.label}</span>
-                <span className={`status-badge ${isAdmin ? 'status-success' : 'status-warning'}`}>
-                  {isAdmin ? 'Admin' : 'User mode'}
-                </span>
-              </div>
-            </div>
+            </section>
 
-            <div className="panel-body">
-              <nav className="nav-grid">
-                {PANELS.map(({ id, label, icon: Icon }) => (
-                  <motion.button
-                    key={id}
-                    type="button"
-                    className={`nav-card ${activePanel === id ? 'active' : ''}`}
-                    onClick={() => setActivePanel(id)}
-                    whileHover={{ y: -2 }}
-                    whileTap={{ scale: 0.99 }}
-                  >
-                    <span className="panel-icon nav-icon">
-                      <Icon size={16} />
-                    </span>
-                    <span className="nav-card-label">{label}</span>
-                  </motion.button>
-                ))}
-              </nav>
-            </div>
-          </section>
+            <AnimatePresence mode="wait" initial={false}>
+              {renderContent()}
+            </AnimatePresence>
+          </main>
+        </section>
+      </motion.div>
 
-          <AnimatePresence mode="wait" initial={false}>
-            {renderContent()}
-          </AnimatePresence>
-        </main>
-      </section>
-    </motion.div>
+      <ToastViewport notice={notice} onDismiss={dismissNotice} />
+    </>
   );
 }
 

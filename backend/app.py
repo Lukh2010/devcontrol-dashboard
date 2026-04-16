@@ -12,6 +12,7 @@ from security import (
     check_rate_limit_or_response,
     clear_failed_attempts,
     create_control_session,
+    has_valid_control_session,
     invalidate_request_control_session,
     is_password_protection_enabled,
     register_failed_attempt,
@@ -20,6 +21,25 @@ from security import (
 )
 from service_runtime import ServiceRuntime
 from services.stream_processor import to_sse
+
+
+def _parse_bool(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_limit(value: str | None, default: int = 100) -> int | None:
+    if value is None or value == "":
+        return default
+
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+
+    if parsed <= 0:
+        return None
+
+    return min(parsed, 500)
 
 def create_app(runtime: ServiceRuntime | None = None) -> Flask:
     runtime = runtime or ServiceRuntime()
@@ -86,14 +106,26 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
     @app.route("/api/processes")
     def get_processes():
         try:
-            return jsonify(runtime.telemetry.collect_processes())
+            return jsonify(runtime.telemetry.collect_processes(
+                search=request.args.get("search", ""),
+                sort=request.args.get("sort", "cpu_desc"),
+                limit=_parse_limit(request.args.get("limit"), default=100),
+                dashboard_only=_parse_bool(request.args.get("dashboard_only")),
+                killable_only=_parse_bool(request.args.get("killable_only")),
+            ))
         except Exception as exc:
             return jsonify({"error": str(exc)}), 500
 
     @app.route("/api/ports")
     def get_ports():
         try:
-            return jsonify(runtime.telemetry.collect_ports())
+            return jsonify(runtime.telemetry.collect_ports(
+                search=request.args.get("search", ""),
+                sort=request.args.get("sort", "port_asc"),
+                limit=_parse_limit(request.args.get("limit"), default=100),
+                dashboard_only=_parse_bool(request.args.get("dashboard_only")),
+                killable_only=_parse_bool(request.args.get("killable_only")),
+            ))
         except Exception as exc:
             return jsonify({"error": str(exc)}), 500
 
@@ -240,9 +272,12 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
             if not verify_control_password(provided_password):
                 register_failed_attempt("auth_session")
                 response = make_response(jsonify({
+                    "error": "Invalid control password",
+                    "message": "The provided control password is incorrect",
                     "valid": False,
                     "configured": True,
-                    "required": True
+                    "required": True,
+                    "session_active": False,
                 }), 401)
                 response.delete_cookie(SESSION_COOKIE_NAME, path="/")
                 return response
@@ -252,7 +287,9 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
             response = make_response(jsonify({
                 "valid": True,
                 "configured": True,
-                "required": True
+                "required": True,
+                "session_active": True,
+                "message": "Control session unlocked",
             }))
             response.set_cookie(
                 SESSION_COOKIE_NAME,
@@ -271,7 +308,7 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
     def delete_auth_session():
         try:
             invalidate_request_control_session()
-            response = make_response(jsonify({"success": True}))
+            response = make_response(jsonify({"success": True, "session_active": False}))
             response.delete_cookie(SESSION_COOKIE_NAME, path="/")
             return response
         except Exception as exc:
@@ -281,9 +318,11 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
     def auth_status():
         try:
             enabled = is_password_protection_enabled()
+            session_active = enabled and has_valid_control_session(request.cookies.get(SESSION_COOKIE_NAME, ""))
             return jsonify({
                 "enabled": enabled,
-                "required": enabled
+                "required": enabled,
+                "session_active": session_active,
             })
         except Exception as exc:
             return jsonify({"error": str(exc)}), 500
