@@ -519,6 +519,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Trivy
+        uses: aquasecurity/setup-trivy@v0.2.3
+        with:
+          version: v0.68.2
+          cache: true
+
       - name: Run Trivy filesystem scan
         uses: aquasecurity/trivy-action@v0.33.1
         with:
@@ -529,15 +535,27 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           exit-code: "1"
+          skip-setup-trivy: true
+
+      - name: Check Trivy SARIF presence
+        if: always()
+        id: trivy_sarif
+        shell: bash
+        run: |
+          if [ -f trivy-results.sarif ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Upload Trivy SARIF
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        if: always() && steps.trivy_sarif.outputs.exists == 'true'
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
 
       - name: Upload Trivy SARIF artifact on failure
-        if: failure()
+        if: failure() && steps.trivy_sarif.outputs.exists == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: trivy-results
