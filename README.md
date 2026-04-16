@@ -299,8 +299,10 @@ Useful API endpoints:
 
 The GitHub Actions workflow runs:
 
+- workflow lint with `actionlint`
 - backend syntax checks
 - backend pytest
+- backend dependency audit with `pip-audit`
 - backend live API smoke tests
 - frontend ESLint
 - frontend production build
@@ -308,6 +310,8 @@ The GitHub Actions workflow runs:
 - Playwright
 - dependency review on pull requests
 - Trivy security scanning
+
+The workflow is split into granular jobs so branch protection can show exactly which gate failed.
 
 Note: local test files are ignored by Git, so any new or modified tests will not be picked up for commits unless you deliberately override the ignore rules.
 

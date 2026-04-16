@@ -12,20 +12,59 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-  security-events: write
+permissions: {}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  backend:
-    name: Backend / Python ${{ matrix.python-version }}
+  workflow-lint:
+    name: workflow-lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Install actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - name: Lint GitHub workflows
+        run: actionlint -color
+
+      - name: Write workflow lint summary
+        if: always()
+        run: |
+          {
+            echo "## workflow-lint"
+            echo "- Status: ${{ job.status }}"
+            echo "- Checked: .github/workflows/*.yml"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  backend-tests:
+    name: backend-tests / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -45,27 +84,79 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
-      - name: Install backend and test dependencies
+      - name: Install backend dependencies and audit tooling
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest
+          pip install -r requirements.txt pytest pip-audit
 
       - name: Static syntax check
         run: python -m compileall backend
 
+      - name: Audit backend dependencies
+        if: matrix.python-version == '3.12'
+        working-directory: backend
+        run: python -m pip_audit -r requirements.txt --progress-spinner off
+
       - name: Run backend pytest suite
         working-directory: backend
-        run: pytest -q
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest -q 2>&1 | tee ../backend-pytest-py${{ matrix.python-version }}.log
+
+      - name: Upload backend pytest log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-pytest-log-py${{ matrix.python-version }}
+          path: backend-pytest-py${{ matrix.python-version }}.log
+          retention-days: 7
+
+      - name: Write backend test summary
+        if: always()
+        run: |
+          {
+            echo "## backend-tests / Python ${{ matrix.python-version }}"
+            echo "- Status: ${{ job.status }}"
+            echo "- Checks: compileall, pytest"
+            if [ "${{ matrix.python-version }}" = "3.12" ]; then
+              echo "- Security: pip-audit"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  backend-smoke:
+    name: backend-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: backend-tests
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Start backend
         working-directory: backend
         env:
           DEVCONTROL_PASSWORD: ci-password
         run: |
-          python app.py > ../backend-ci.log 2>&1 &
-          echo $! > ../backend-ci.pid
+          python app.py > ../backend-smoke.log 2>&1 &
+          echo $! > ../backend-smoke.pid
 
       - name: Wait for backend readiness
         run: |
@@ -93,11 +184,14 @@ jobs:
       - name: Backend API smoke tests
         run: |
           python - <<'PY'
+          import http.cookiejar
           import json
           import urllib.error
           import urllib.request
 
           BASE = "http://127.0.0.1:8000"
+          cookies = http.cookiejar.CookieJar()
+          opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookies))
 
           def request_json(path, method="GET", body=None, headers=None, expected_status=200):
             data = None
@@ -114,7 +208,7 @@ jobs:
             )
 
             try:
-              with urllib.request.urlopen(request, timeout=10) as response:
+              with opener.open(request, timeout=10) as response:
                 payload = json.loads(response.read().decode("utf-8"))
                 assert response.status == expected_status, (path, response.status, payload)
                 return payload
@@ -125,12 +219,20 @@ jobs:
 
           auth_status = request_json("/api/auth/status")
           assert auth_status["enabled"] is True
+          assert auth_status["session_active"] is False
 
           invalid = request_json("/api/auth/validate", method="POST", body={"password": "wrong"})
           assert invalid["valid"] is False
 
           valid = request_json("/api/auth/validate", method="POST", body={"password": "ci-password"})
           assert valid["valid"] is True
+
+          create_session = request_json("/api/auth/session", method="POST", body={"password": "ci-password"})
+          assert create_session["valid"] is True
+          assert create_session["session_active"] is True
+
+          auth_status_after_login = request_json("/api/auth/status")
+          assert auth_status_after_login["session_active"] is True
 
           system_info = request_json("/api/system/info")
           assert system_info["hostname"]
@@ -146,6 +248,21 @@ jobs:
 
           network = request_json("/api/network/info")
           assert "interfaces" in network
+
+          cookie_authorized = request_json(
+            "/api/commands/run",
+            method="POST",
+            body={"command": "echo cookie ci"}
+          )
+          assert cookie_authorized["success"] is True
+          assert "cookie ci" in cookie_authorized["stdout"].lower()
+
+          delete_session = request_json("/api/auth/session", method="DELETE")
+          assert delete_session["success"] is True
+          assert delete_session["session_active"] is False
+
+          auth_status_after_logout = request_json("/api/auth/status")
+          assert auth_status_after_logout["session_active"] is False
 
           unauthorized = request_json(
             "/api/commands/run",
@@ -177,21 +294,33 @@ jobs:
       - name: Stop backend
         if: always()
         run: |
-          if [ -f backend-ci.pid ]; then
-            kill "$(cat backend-ci.pid)" || true
+          if [ -f backend-smoke.pid ]; then
+            kill "$(cat backend-smoke.pid)" || true
           fi
 
-      - name: Upload backend log on failure
+      - name: Upload backend smoke log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-log-py${{ matrix.python-version }}
-          path: backend-ci.log
+          name: backend-smoke-log
+          path: backend-smoke.log
           retention-days: 7
 
-  frontend-quality:
-    name: Frontend Quality
+      - name: Write backend smoke summary
+        if: always()
+        run: |
+          {
+            echo "## backend-smoke"
+            echo "- Status: ${{ job.status }}"
+            echo "- Smoke coverage: auth status, session login/logout, protected command auth, telemetry endpoints"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  frontend-lint:
+    name: frontend-lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -212,25 +341,21 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
-      - name: Build frontend
-        working-directory: frontend
-        run: npm run build
+      - name: Write frontend lint summary
+        if: always()
+        run: |
+          {
+            echo "## frontend-lint"
+            echo "- Status: ${{ job.status }}"
+            echo "- Check: ESLint"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Run Vitest
-        working-directory: frontend
-        run: npm run test
-
-      - name: Upload frontend build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-dist
-          path: frontend/dist
-          retention-days: 7
-
-  frontend-e2e:
-    name: Frontend E2E
+  frontend-build:
+    name: frontend-build
     runs-on: ubuntu-latest
-    needs: frontend-quality
+    timeout-minutes: 15
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -242,6 +367,89 @@ jobs:
           node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Upload frontend build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 7
+
+      - name: Write frontend build summary
+        if: always()
+        run: |
+          {
+            echo "## frontend-build"
+            echo "- Status: ${{ job.status }}"
+            echo "- Artifact: frontend-dist"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  frontend-unit:
+    name: frontend-unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run Vitest
+        working-directory: frontend
+        run: npm run test
+
+      - name: Write frontend unit summary
+        if: always()
+        run: |
+          {
+            echo "## frontend-unit"
+            echo "- Status: ${{ job.status }}"
+            echo "- Check: Vitest"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  frontend-e2e:
+    name: frontend-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Restore Playwright browser cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('frontend/package-lock.json') }}
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -265,10 +473,23 @@ jobs:
             frontend/playwright-report
           retention-days: 7
 
+      - name: Write frontend E2E summary
+        if: always()
+        run: |
+          {
+            echo "## frontend-e2e"
+            echo "- Status: ${{ job.status }}"
+            echo "- Check: Playwright"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   dependency-review:
-    name: Dependency Review
+    name: dependency-review
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
 
     steps:
       - name: Checkout
@@ -277,33 +498,57 @@ jobs:
       - name: Dependency review
         uses: actions/dependency-review-action@v4
 
+      - name: Write dependency review summary
+        if: always()
+        run: |
+          {
+            echo "## dependency-review"
+            echo "- Status: ${{ job.status }}"
+            echo "- Trigger: pull_request only"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   security-scan:
-    name: Security Scan
+    name: security-scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Trivy
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wget gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install -y trivy
-
       - name: Run Trivy filesystem scan
-        run: |
-          trivy fs \
-            --scanners vuln,secret,misconfig \
-            --severity HIGH,CRITICAL \
-            --format sarif \
-            --output trivy-results.sarif \
-            .
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: "1"
 
       - name: Upload Trivy SARIF
+        if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-results.sarif
+
+      - name: Upload Trivy SARIF artifact on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-results
+          path: trivy-results.sarif
+          retention-days: 7
+
+      - name: Write security scan summary
+        if: always()
+        run: |
+          {
+            echo "## security-scan"
+            echo "- Status: ${{ job.status }}"
+            echo "- Tooling: Trivy filesystem scan + SARIF upload"
+          } >> "$GITHUB_STEP_SUMMARY"

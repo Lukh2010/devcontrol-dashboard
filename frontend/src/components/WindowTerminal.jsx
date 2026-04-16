@@ -35,6 +35,7 @@ const WindowTerminal = ({
   const outputEndRef = useRef(null);
   const wsRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
+  const connectWebSocketRef = useRef(null);
   const reconnectStateRef = useRef('idle');
   const wasConnectedRef = useRef(false);
   const intentionalCloseRef = useRef(false);
@@ -100,7 +101,7 @@ const WindowTerminal = ({
       reconnectStateRef.current = 'reconnecting';
       setConnectionState('reconnecting');
       setConnectionMessage('Attempting to reconnect to the terminal gateway.');
-      connectWebSocket();
+      connectWebSocketRef.current?.();
     }, delayMs);
   }, []);
 
@@ -248,6 +249,10 @@ const WindowTerminal = ({
       scheduleReconnect(3000);
     }
   }, [authUnlocked, closeSocket, handleMessage, passwordProtectionEnabled, scheduleReconnect]);
+
+  useEffect(() => {
+    connectWebSocketRef.current = connectWebSocket;
+  }, [connectWebSocket]);
 
   useEffect(() => {
     connectWebSocket();
