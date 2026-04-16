@@ -519,23 +519,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Trivy
-        uses: aquasecurity/setup-trivy@e6c2c5e321ed9123bda567646e2f96565e34abe1
-        with:
-          version: v0.68.2
-          cache: true
-
       - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@v0.33.1
-        with:
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln,secret,misconfig
-          severity: HIGH,CRITICAL
-          format: sarif
-          output: trivy-results.sarif
-          exit-code: "1"
-          skip-setup-trivy: true
+        id: trivy_scan
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          docker run --rm \
+            -v "${PWD}:/workdir" \
+            ghcr.io/aquasecurity/trivy:0.68.2 \
+            fs \
+            --scanners vuln,secret,misconfig \
+            --severity HIGH,CRITICAL \
+            --format sarif \
+            --output /workdir/trivy-results.sarif \
+            --exit-code 1 \
+            /workdir
+          exit_code=$?
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          exit 0
 
       - name: Check Trivy SARIF presence
         if: always()
@@ -555,12 +557,19 @@ jobs:
           sarif_file: trivy-results.sarif
 
       - name: Upload Trivy SARIF artifact on failure
-        if: failure() && steps.trivy_sarif.outputs.exists == 'true'
+        if: steps.trivy_scan.outputs.exit_code != '0' && steps.trivy_sarif.outputs.exists == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: trivy-results
           path: trivy-results.sarif
           retention-days: 7
+
+      - name: Fail on Trivy findings or scan errors
+        if: steps.trivy_scan.outputs.exit_code != '0'
+        shell: bash
+        run: |
+          echo "Trivy exited with code ${{ steps.trivy_scan.outputs.exit_code }}"
+          exit 1
 
       - name: Write security scan summary
         if: always()
