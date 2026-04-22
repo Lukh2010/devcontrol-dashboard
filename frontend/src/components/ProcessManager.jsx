@@ -13,11 +13,35 @@ import {
 import ConfirmDialog from './ConfirmDialog';
 
 function formatMemory(memoryMb) {
-  if (memoryMb > 1024) {
-    return `${(memoryMb / 1024).toFixed(1)} GB`;
+  const safeMemory = Number(memoryMb ?? 0);
+
+  if (!Number.isFinite(safeMemory) || safeMemory <= 0) {
+    return '0 MB';
   }
 
-  return `${Math.round(memoryMb)} MB`;
+  if (safeMemory > 1024) {
+    return `${(safeMemory / 1024).toFixed(1)} GB`;
+  }
+
+  return `${Math.round(safeMemory)} MB`;
+}
+
+function formatCpuPercent(cpuPercent) {
+  const safeCpu = Number(cpuPercent ?? 0);
+
+  if (!Number.isFinite(safeCpu) || safeCpu <= 0) {
+    return '0%';
+  }
+
+  if (safeCpu < 0.1) {
+    return '<0.1%';
+  }
+
+  if (safeCpu < 10) {
+    return `${safeCpu.toFixed(1)}%`;
+  }
+
+  return `${Math.round(safeCpu)}%`;
 }
 
 function formatUpdatedAt(timestamp) {
@@ -56,6 +80,22 @@ function buildProcessLabel(node) {
   return `${node.process.name} (${node.groupSize})`;
 }
 
+function getDisplayedCpuPercent(node, expanded) {
+  if (node.children.length && !expanded) {
+    return node.aggregateCpuPercent;
+  }
+
+  return node.ownCpuPercent ?? node.process.cpu_percent ?? 0;
+}
+
+function getDisplayedMemoryMb(node, expanded) {
+  if (node.children.length && !expanded) {
+    return node.aggregateMemoryMb;
+  }
+
+  return node.ownMemoryMb ?? node.process.memory_mb ?? 0;
+}
+
 const ProcessManager = ({
   processes,
   loading,
@@ -69,8 +109,6 @@ const ProcessManager = ({
   const [sort, setSort] = useState('cpu_desc');
   const [dashboardOnly, setDashboardOnly] = useState(false);
   const [killableOnly, setKillableOnly] = useState(false);
-  const [highCpuOnly, setHighCpuOnly] = useState(false);
-  const [highMemoryOnly, setHighMemoryOnly] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [pendingProcess, setPendingProcess] = useState(null);
   const [expandedProcessIds, setExpandedProcessIds] = useState(() => new Set());
@@ -98,20 +136,12 @@ const ProcessManager = ({
     [processQuery.data, processes]
   );
   const matchesLocalFilters = useMemo(() => (process) => {
-      if (highCpuOnly && process.cpu_percent < 50) {
-        return false;
-      }
-
-      if (highMemoryOnly && process.memory_mb < 1024) {
-        return false;
-      }
-
       if (statusFilter !== 'all' && process.status !== statusFilter) {
         return false;
       }
 
       return true;
-    }, [highCpuOnly, highMemoryOnly, statusFilter]);
+    }, [statusFilter]);
 
   const matchingProcesses = useMemo(() => (
     allProcesses.filter(matchesLocalFilters)
@@ -124,7 +154,7 @@ const ProcessManager = ({
     })
   ), [allProcesses, matchesLocalFilters, sort]);
 
-  const autoExpandTree = Boolean(deferredSearch.trim() || highCpuOnly || highMemoryOnly || statusFilter !== 'all');
+  const autoExpandTree = Boolean(deferredSearch.trim() || statusFilter !== 'all');
 
   const flatRows = useMemo(() => (
     flattenProcessTree(processTree, expandedProcessIds, autoExpandTree)
@@ -329,14 +359,6 @@ const ProcessManager = ({
               <input type="checkbox" checked={killableOnly} onChange={(event) => setKillableOnly(event.target.checked)} />
               Killable only
             </label>
-            <label className="toggle-chip">
-              <input type="checkbox" checked={highCpuOnly} onChange={(event) => setHighCpuOnly(event.target.checked)} />
-              High CPU
-            </label>
-            <label className="toggle-chip">
-              <input type="checkbox" checked={highMemoryOnly} onChange={(event) => setHighMemoryOnly(event.target.checked)} />
-              High memory
-            </label>
           </div>
         </div>
 
@@ -386,6 +408,11 @@ const ProcessManager = ({
                     const expanded = autoExpandTree || expandedProcessIds.has(process.pid);
                     const processLabel = buildProcessLabel(node);
                     const secondaryLine = process.command_line || process.exe_path || process.kill_reason || 'Ready for inspection';
+                    const displayedCpuPercent = getDisplayedCpuPercent(node, expanded);
+                    const displayedMemoryMb = getDisplayedMemoryMb(node, expanded);
+                    const groupTotals = node.children.length
+                      ? `Group total ${formatCpuPercent(node.aggregateCpuPercent)} CPU | ${formatMemory(node.aggregateMemoryMb)}`
+                      : null;
 
                     return (
                     <tr key={process.pid}>
@@ -412,16 +439,19 @@ const ProcessManager = ({
                                 </span>
                                 {process.username ? <span className="status-pill neutral">{process.username}</span> : null}
                               </div>
+                              {expanded && groupTotals ? (
+                                <span className="muted-note wrap-text">{groupTotals}</span>
+                              ) : null}
                               <span className="muted-note wrap-text">{secondaryLine}</span>
                             </div>
                           </div>
                         </div>
                       </td>
                       <td>{process.pid}</td>
-                      <td className={process.cpu_percent > 80 ? 'value-danger' : process.cpu_percent > 50 ? 'value-warn' : 'value-good'}>
-                        {process.cpu_percent}%
+                      <td className={displayedCpuPercent > 80 ? 'value-danger' : displayedCpuPercent > 50 ? 'value-warn' : 'value-good'}>
+                        {formatCpuPercent(displayedCpuPercent)}
                       </td>
-                      <td>{formatMemory(process.memory_mb)}</td>
+                      <td>{formatMemory(displayedMemoryMb)}</td>
                       <td><span className="status-pill neutral">{process.status}</span></td>
                       <td>
                         <span className={`status-pill ${process.dashboard_owned ? 'good' : 'warn'}`}>
@@ -452,6 +482,11 @@ const ProcessManager = ({
               {flatRows.map((node) => {
                 const process = node.process;
                 const expanded = autoExpandTree || expandedProcessIds.has(process.pid);
+                const displayedCpuPercent = getDisplayedCpuPercent(node, expanded);
+                const displayedMemoryMb = getDisplayedMemoryMb(node, expanded);
+                const groupTotals = node.children.length
+                  ? `Group total ${formatCpuPercent(node.aggregateCpuPercent)} CPU | ${formatMemory(node.aggregateMemoryMb)}`
+                  : null;
                 return (
                 <div
                   key={`mobile-${process.pid}`}
@@ -484,8 +519,8 @@ const ProcessManager = ({
                     </span>
                   </div>
                   <div className="explorer-metrics">
-                    <span>CPU {process.cpu_percent}%</span>
-                    <span>{formatMemory(process.memory_mb)}</span>
+                    <span>CPU {formatCpuPercent(displayedCpuPercent)}</span>
+                    <span>{formatMemory(displayedMemoryMb)}</span>
                     <span>{process.status}</span>
                   </div>
                   <div className="process-chip-row">
@@ -494,6 +529,7 @@ const ProcessManager = ({
                     </span>
                     {process.username ? <span className="status-pill neutral">{process.username}</span> : null}
                   </div>
+                  {expanded && groupTotals ? <div className="muted-note wrap-text">{groupTotals}</div> : null}
                   <div className="muted-note wrap-text">{process.command_line || process.exe_path || process.kill_reason || 'Dashboard-owned process.'}</div>
                   <button
                     className="danger-button"

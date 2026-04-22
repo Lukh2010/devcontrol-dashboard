@@ -40,17 +40,18 @@ class SystemInventoryService:
             "-NoProfile",
             "-Command",
             (
-                "$perf = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process;"
+                "$runtimeById = @{};"
+                "Get-Process | ForEach-Object { $runtimeById[$_.Id] = $_ };"
                 "$processes = Get-CimInstance Win32_Process;"
                 "$result = foreach ($proc in $processes) {"
-                "  $metric = $perf | Where-Object { $_.IDProcess -eq $proc.ProcessId } | Select-Object -First 1;"
+                "  $runtime = $runtimeById[[int]$proc.ProcessId];"
                 "  [PSCustomObject]@{"
                 "    pid = [int]$proc.ProcessId;"
                 "    parent_pid = [int]$proc.ParentProcessId;"
                 "    name = $proc.Name;"
-                "    cpu_percent = if ($metric) { [double]$metric.PercentProcessorTime } else { 0 };"
-                "    memory_mb = if ($metric) { [math]::Round(([double]$metric.WorkingSetPrivate / 1MB), 2) } else { 0 };"
-                "    status = $null;"
+                "    cpu_time_total = if ($runtime -and $null -ne $runtime.CPU) { [double]$runtime.CPU } else { 0 };"
+                "    memory_mb = if ($runtime -and $null -ne $runtime.WorkingSet64) { [math]::Round(([double]$runtime.WorkingSet64 / 1MB), 2) } else { 0 };"
+                "    status = if ($runtime) { 'running' } else { $null };"
                 "    username = $null;"
                 "    exe_path = $proc.ExecutablePath;"
                 "    command_line = $proc.CommandLine;"
@@ -60,7 +61,9 @@ class SystemInventoryService:
                 "$result | ConvertTo-Json -Depth 4 -Compress"
             ),
         ])
-        return [self._normalize_process_record(record) for record in self._load_json_records(output)]
+        records = [self._normalize_process_record(record) for record in self._load_json_records(output)]
+        self._ensure_windows_process_records_are_usable(records)
+        return records
 
     def _collect_windows_ports(self) -> list[dict[str, Any]]:
         output = self._run_command([
@@ -203,6 +206,7 @@ class SystemInventoryService:
             "parent_pid": self._to_int(record.get("parent_pid")),
             "name": name,
             "cpu_percent": round(self._to_float(record.get("cpu_percent")), 2),
+            "cpu_time_total": round(self._to_float(record.get("cpu_time_total")), 4),
             "memory_mb": round(self._to_float(record.get("memory_mb")), 2),
             "status": str(record.get("status") or "unknown"),
             "username": self._to_optional_str(record.get("username")),
@@ -210,6 +214,18 @@ class SystemInventoryService:
             "command_line": self._to_optional_str(record.get("command_line")),
             "started_at": self._to_optional_str(record.get("started_at")),
         }
+
+    def _ensure_windows_process_records_are_usable(self, records: list[dict[str, Any]]) -> None:
+        """Reject empty or obviously broken Windows process snapshots."""
+        if not records:
+            raise RuntimeError("Windows inventory returned no process records")
+
+        has_runtime_signal = any(
+            (record.get("memory_mb") or 0) > 0 or (record.get("cpu_time_total") or 0) > 0
+            for record in records
+        )
+        if not has_runtime_signal:
+            raise RuntimeError("Windows inventory returned only zeroed process metrics")
 
     def _normalize_port_record(self, record: dict[str, Any]) -> dict[str, Any]:
         """Return a consistent port record shape."""

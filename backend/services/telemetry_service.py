@@ -22,6 +22,9 @@ class TelemetryCollectorService:
         self._last_cpu_update = 0
         self._process_cpu_times = {}
         self._cpu_cache_ready = False
+        self._windows_live_cpu_cache = {}
+        self._windows_live_cpu_last_update = 0.0
+        self._windows_live_cpu_procs = {}
         self._running = False
         self._thread = None
         self.collectors = {
@@ -197,6 +200,66 @@ class TelemetryCollectorService:
         except Exception as exc:
             print(f"Error updating CPU cache: {exc}")
 
+    def _update_inventory_cpu_cache(self, records: list[dict]) -> dict[int, float]:
+        current_time = time.time()
+        if current_time - self._last_cpu_update < 1.0:
+            return dict(self._cpu_cache)
+
+        cpu_count = max(psutil.cpu_count() or 1, 1)
+        previous_snapshot_exists = bool(self._process_cpu_times) and self._last_cpu_update > 0
+        elapsed = current_time - self._last_cpu_update if previous_snapshot_exists else 0.0
+        new_cache: dict[int, float] = {}
+        new_cpu_times: dict[int, float] = {}
+
+        for record in records:
+            pid = int(record.get("pid") or 0)
+            if not pid:
+                continue
+
+            total_cpu_time = float(record.get("cpu_time_total") or 0.0)
+            new_cpu_times[pid] = total_cpu_time
+
+            previous_cpu_time = self._process_cpu_times.get(pid)
+            if previous_cpu_time is None or elapsed <= 0:
+                new_cache[pid] = round(float(record.get("cpu_percent") or 0.0), 4)
+                continue
+
+            cpu_delta = max(total_cpu_time - previous_cpu_time, 0.0)
+            normalized_cpu = min(max((cpu_delta / elapsed) / cpu_count * 100, 0.0), 100.0)
+            new_cache[pid] = round(normalized_cpu, 4)
+
+        self._cpu_cache = new_cache
+        self._process_cpu_times = new_cpu_times
+        self._last_cpu_update = current_time
+        self._cpu_cache_ready = previous_snapshot_exists and elapsed > 0
+        return dict(new_cache)
+
+    def _update_windows_live_cpu_cache(self, pids: list[int]) -> dict[int, float]:
+        """Sample per-process CPU via psutil for Windows inventory-backed snapshots."""
+        current_time = time.time()
+        if current_time - self._windows_live_cpu_last_update < 1.0:
+            return dict(self._windows_live_cpu_cache)
+
+        cpu_count = max(psutil.cpu_count() or 1, 1)
+        requested_pids = {int(pid) for pid in pids if int(pid or 0) > 0}
+        next_procs = {}
+        next_cache: dict[int, float] = {}
+
+        for pid in requested_pids:
+            try:
+                process = self._windows_live_cpu_procs.get(pid) or psutil.Process(pid)
+                raw_cpu_percent = float(process.cpu_percent(interval=None) or 0.0)
+                normalized_cpu = min(max(raw_cpu_percent / cpu_count, 0.0), 100.0)
+                next_cache[pid] = round(normalized_cpu, 4)
+                next_procs[pid] = process
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+                continue
+
+        self._windows_live_cpu_cache = next_cache
+        self._windows_live_cpu_procs = next_procs
+        self._windows_live_cpu_last_update = current_time
+        return dict(next_cache)
+
     def collect_processes(
         self,
         search: str = "",
@@ -234,16 +297,29 @@ class TelemetryCollectorService:
         is_admin = self.collect_is_admin()
         normalized_search = (search or "").strip().lower()
         processes = []
+        records = self.inventory_service.collect_processes()
+        cpu_cache = self._update_inventory_cpu_cache(records)
+        windows_live_cpu_cache = {}
+        if platform.system() == "Windows":
+            windows_live_cpu_cache = self._update_windows_live_cpu_cache([
+                int(record.get("pid") or 0) for record in records
+            ])
 
-        for record in self.inventory_service.collect_processes():
+        for record in records:
+            pid = int(record.get("pid") or 0)
+            computed_cpu_percent = max(
+                cpu_cache.get(pid, 0.0),
+                windows_live_cpu_cache.get(pid, 0.0),
+                float(record.get("cpu_percent") or 0.0),
+            )
             process_name = str(record.get("name") or "Unknown").strip() or "Unknown"
             if process_name == "System Idle Process":
                 continue
 
             process_entry = self._build_process_entry({
-                "pid": int(record.get("pid") or 0),
+                "pid": pid,
                 "name": process_name,
-                "cpu_percent": round(float(record.get("cpu_percent") or 0.0), 2),
+                "cpu_percent": round(computed_cpu_percent, 4),
                 "memory_mb": round(float(record.get("memory_mb") or 0.0), 2),
                 "status": str(record.get("status") or "unknown"),
                 "parent_pid": int(record.get("parent_pid") or 0),
@@ -251,6 +327,7 @@ class TelemetryCollectorService:
                 "exe_path": record.get("exe_path"),
                 "command_line": record.get("command_line"),
                 "started_at": record.get("started_at"),
+                "cpu_time_total": round(float(record.get("cpu_time_total") or 0.0), 4),
                 "inventory_source": "command",
                 "inventory_degraded": False,
             }, is_admin)
