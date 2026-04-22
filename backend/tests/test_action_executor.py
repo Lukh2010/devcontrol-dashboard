@@ -175,3 +175,40 @@ def test_protected_endpoints_return_401_with_wrong_password(monkeypatch):
     port_delete_response = client.delete("/api/port/8080", headers=headers)
     assert port_delete_response.status_code == 401
     assert "error" in port_delete_response.get_json()
+
+
+class FakeInventoryService:
+    def __init__(self, ports=None, error: Exception | None = None):
+        self._ports = ports or []
+        self._error = error
+
+    def collect_ports(self):
+        if self._error is not None:
+            raise self._error
+        return list(self._ports)
+
+
+def test_kill_process_by_port_uses_inventory_lookup(monkeypatch):
+    monkeypatch.setattr("services.action_executor.is_dashboard_pid", lambda pid: pid == 4321)
+
+    terminated = {"called": False}
+
+    class FakeProcess:
+        def name(self):
+            return "dashboard-api.exe"
+
+        def terminate(self):
+            terminated["called"] = True
+
+    monkeypatch.setattr("services.action_executor.psutil.Process", lambda pid: FakeProcess())
+
+    service = ActionExecutorService(
+        InMemoryEventBus(),
+        inventory_service=FakeInventoryService(ports=[{"port": 8000, "pid": 4321, "process_name": "dashboard-api.exe"}]),
+    )
+
+    payload, status = service.kill_process_by_port(8000)
+
+    assert status == 200
+    assert terminated["called"] is True
+    assert "4321" in payload["message"]

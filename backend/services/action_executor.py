@@ -13,6 +13,7 @@ from command_classifier import (
 )
 from dashboard_pids import is_dashboard_pid
 from security import is_password_protection_enabled
+from services.system_inventory_service import SystemInventoryService
 
 
 class ActionExecutorService:
@@ -27,57 +28,60 @@ class ActionExecutorService:
         "set",
     }
 
-    def __init__(self, event_bus):
+    def __init__(self, event_bus, inventory_service: SystemInventoryService | None = None):
         self.event_bus = event_bus
         self.classifier = CommandClassifier()
+        self.inventory_service = inventory_service or SystemInventoryService()
 
     def kill_process_by_port(self, port: int):
-        for conn in psutil.net_connections():
-            if conn.status == "LISTEN" and conn.laddr.port == port:
-                try:
-                    if not conn.pid or not is_dashboard_pid(conn.pid):
-                        self._publish_action(
-                            "kill_by_port",
-                            "failed",
-                            message=f"Port {port} is not owned by a DevControl-managed process",
-                            severity="danger",
-                            entity_type="port",
-                            entity_id=port,
-                            port=port,
-                            reason="not_dashboard_pid",
-                        )
-                        return {
-                            "error": f"Port {port} is not owned by a dashboard-managed process"
-                        }, 403
-
-                    process = psutil.Process(conn.pid)
-                    process.terminate()
-                    self._publish_action(
-                        "kill_by_port",
-                        "success",
-                        message=f"Stopped {process.name()} on port {port}",
-                        severity="success",
-                        entity_type="port",
-                        entity_id=port,
-                        port=port,
-                        pid=conn.pid,
-                        process_name=process.name()
-                    )
-                    return {
-                        "message": f"Process {process.name()} (PID: {conn.pid}) terminated successfully"
-                    }, 200
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
+        listener = self._find_listener_by_port(port)
+        if listener is not None:
+            pid = listener["pid"]
+            try:
+                if not pid or not is_dashboard_pid(pid):
                     self._publish_action(
                         "kill_by_port",
                         "failed",
-                        message=f"Cannot terminate the process on port {port}",
+                        message=f"Port {port} is not owned by a DevControl-managed process",
                         severity="danger",
                         entity_type="port",
                         entity_id=port,
                         port=port,
-                        reason="access_denied_or_missing",
+                        reason="not_dashboard_pid",
                     )
-                    return {"error": f"Cannot terminate process on port {port}"}, 403
+                    return {
+                        "error": f"Port {port} is not owned by a dashboard-managed process"
+                    }, 403
+
+                process = psutil.Process(pid)
+                process_name = process.name()
+                process.terminate()
+                self._publish_action(
+                    "kill_by_port",
+                    "success",
+                    message=f"Stopped {process_name} on port {port}",
+                    severity="success",
+                    entity_type="port",
+                    entity_id=port,
+                    port=port,
+                    pid=pid,
+                    process_name=process_name
+                )
+                return {
+                    "message": f"Process {process_name} (PID: {pid}) terminated successfully"
+                }, 200
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                self._publish_action(
+                    "kill_by_port",
+                    "failed",
+                    message=f"Cannot terminate the process on port {port}",
+                    severity="danger",
+                    entity_type="port",
+                    entity_id=port,
+                    port=port,
+                    reason="access_denied_or_missing",
+                )
+                return {"error": f"Cannot terminate process on port {port}"}, 403
 
         self._publish_action(
             "kill_by_port",
@@ -90,6 +94,27 @@ class ActionExecutorService:
             reason="port_not_found",
         )
         return {"error": f"No process found using port {port}"}, 404
+
+    def _find_listener_by_port(self, port: int) -> dict | None:
+        try:
+            listeners = self.inventory_service.collect_ports()
+            for listener in listeners:
+                if int(listener.get("port") or 0) == port:
+                    return {
+                        "pid": int(listener.get("pid") or 0),
+                        "process_name": str(listener.get("process_name") or "Unknown"),
+                    }
+        except Exception as exc:
+            print(f"Inventory-backed port lookup failed, falling back to psutil: {exc}")
+
+        for conn in psutil.net_connections():
+            if conn.status == "LISTEN" and conn.laddr.port == port:
+                return {
+                    "pid": int(conn.pid or 0),
+                    "process_name": None,
+                }
+
+        return None
 
     def run_command(self, command: str, name: str = ""):
         if not isinstance(command, str) or not command.strip():

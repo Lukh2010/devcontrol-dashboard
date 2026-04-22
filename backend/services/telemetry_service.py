@@ -8,13 +8,15 @@ import time
 import psutil
 
 from dashboard_pids import is_dashboard_pid
+from services.system_inventory_service import SystemInventoryService
 
 
 class TelemetryCollectorService:
     """Collects host telemetry and publishes snapshots onto the event bus."""
 
-    def __init__(self, event_bus):
+    def __init__(self, event_bus, inventory_service: SystemInventoryService | None = None):
         self.event_bus = event_bus
+        self.inventory_service = inventory_service or SystemInventoryService()
         self._cpu_cache = {}
         self._last_cpu_update = 0
         self._process_cpu_times = {}
@@ -202,6 +204,83 @@ class TelemetryCollectorService:
         dashboard_only: bool = False,
         killable_only: bool = False,
     ):
+        try:
+            return self._collect_processes_with_inventory(
+                search=search,
+                sort=sort,
+                limit=limit,
+                dashboard_only=dashboard_only,
+                killable_only=killable_only,
+            )
+        except Exception as exc:
+            print(f"Inventory-backed process collection failed, falling back to psutil: {exc}")
+            return self._collect_processes_with_psutil(
+                search=search,
+                sort=sort,
+                limit=limit,
+                dashboard_only=dashboard_only,
+                killable_only=killable_only,
+            )
+
+    def _collect_processes_with_inventory(
+        self,
+        search: str = "",
+        sort: str = "cpu_desc",
+        limit: int | None = 15,
+        dashboard_only: bool = False,
+        killable_only: bool = False,
+    ):
+        is_admin = self.collect_is_admin()
+        normalized_search = (search or "").strip().lower()
+        processes = []
+
+        for record in self.inventory_service.collect_processes():
+            process_name = str(record.get("name") or "Unknown").strip() or "Unknown"
+            if process_name == "System Idle Process":
+                continue
+
+            process_entry = self._build_process_entry({
+                "pid": int(record.get("pid") or 0),
+                "name": process_name,
+                "cpu_percent": round(float(record.get("cpu_percent") or 0.0), 2),
+                "memory_mb": round(float(record.get("memory_mb") or 0.0), 2),
+                "status": str(record.get("status") or "unknown"),
+                "parent_pid": int(record.get("parent_pid") or 0),
+                "username": record.get("username"),
+                "exe_path": record.get("exe_path"),
+                "command_line": record.get("command_line"),
+                "started_at": record.get("started_at"),
+            }, is_admin)
+
+            if dashboard_only and not process_entry["dashboard_owned"]:
+                continue
+            if killable_only and not process_entry["killable"]:
+                continue
+
+            searchable = " ".join([
+                process_entry["name"],
+                str(process_entry["pid"]),
+                str(process_entry.get("username") or ""),
+                str(process_entry.get("command_line") or ""),
+            ]).lower()
+            if normalized_search and normalized_search not in searchable:
+                continue
+
+            processes.append(process_entry)
+
+        sorted_processes = self._sort_processes(processes, sort)
+        if limit is None or limit <= 0:
+            return sorted_processes
+        return sorted_processes[:limit]
+
+    def _collect_processes_with_psutil(
+        self,
+        search: str = "",
+        sort: str = "cpu_desc",
+        limit: int | None = 15,
+        dashboard_only: bool = False,
+        killable_only: bool = False,
+    ):
         self._update_cpu_cache()
         is_admin = self.collect_is_admin()
         normalized_search = (search or "").strip().lower()
@@ -236,6 +315,79 @@ class TelemetryCollectorService:
         return sorted_processes[:limit]
 
     def collect_ports(
+        self,
+        search: str = "",
+        sort: str = "port_asc",
+        limit: int | None = 100,
+        dashboard_only: bool = False,
+        killable_only: bool = False,
+    ):
+        try:
+            return self._collect_ports_with_inventory(
+                search=search,
+                sort=sort,
+                limit=limit,
+                dashboard_only=dashboard_only,
+                killable_only=killable_only,
+            )
+        except Exception as exc:
+            print(f"Inventory-backed port collection failed, falling back to psutil: {exc}")
+            return self._collect_ports_with_psutil(
+                search=search,
+                sort=sort,
+                limit=limit,
+                dashboard_only=dashboard_only,
+                killable_only=killable_only,
+            )
+
+    def _collect_ports_with_inventory(
+        self,
+        search: str = "",
+        sort: str = "port_asc",
+        limit: int | None = 100,
+        dashboard_only: bool = False,
+        killable_only: bool = False,
+    ):
+        normalized_search = (search or "").strip().lower()
+        is_admin = self.collect_is_admin()
+        connections = {}
+
+        for record in self.inventory_service.collect_ports():
+            port_entry = self._build_port_entry({
+                "port": int(record.get("port") or 0),
+                "process_name": str(record.get("process_name") or "Unknown").strip() or "Unknown",
+                "pid": int(record.get("pid") or 0),
+                "status": str(record.get("status") or "LISTEN"),
+                "protocol": record.get("protocol"),
+                "local_address": record.get("local_address"),
+                "remote_address": record.get("remote_address"),
+                "state": record.get("state"),
+                "exe_path": record.get("exe_path"),
+            }, is_admin)
+
+            if dashboard_only and not port_entry["dashboard_owned"]:
+                continue
+            if killable_only and not port_entry["killable"]:
+                continue
+
+            searchable = " ".join([
+                str(port_entry["port"]),
+                port_entry["process_name"],
+                str(port_entry["pid"]),
+                str(port_entry.get("local_address") or ""),
+            ]).lower()
+            if normalized_search and normalized_search not in searchable:
+                continue
+
+            key = (port_entry["port"], port_entry["pid"], port_entry["process_name"])
+            connections[key] = port_entry
+
+        sorted_ports = self._sort_ports(list(connections.values()), sort)
+        if limit is None or limit <= 0:
+            return sorted_ports
+        return sorted_ports[:limit]
+
+    def _collect_ports_with_psutil(
         self,
         search: str = "",
         sort: str = "port_asc",

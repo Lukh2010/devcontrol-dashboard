@@ -4,6 +4,7 @@ import threading
 from dashboard_pids import register_dashboard_pid
 from event_bus import InMemoryEventBus
 from services.action_executor import ActionExecutorService
+from services.system_inventory_service import SystemInventoryService
 from services.stream_processor import StreamProcessor
 from services.telemetry_service import TelemetryCollectorService
 from services.terminal_gateway import TerminalGatewayService
@@ -15,8 +16,9 @@ class ServiceRuntime:
     def __init__(self):
         self.event_bus = InMemoryEventBus()
         self.stream_processor = StreamProcessor(self.event_bus)
-        self.telemetry = TelemetryCollectorService(self.event_bus)
-        self.actions = ActionExecutorService(self.event_bus)
+        self.inventory = SystemInventoryService()
+        self.telemetry = TelemetryCollectorService(self.event_bus, inventory_service=self.inventory)
+        self.actions = ActionExecutorService(self.event_bus, inventory_service=self.inventory)
         self.terminal_gateway = TerminalGatewayService(self.event_bus)
 
     def start(self):
