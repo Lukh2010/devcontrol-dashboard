@@ -142,3 +142,59 @@ def test_commands_run_is_rate_limited(monkeypatch):
     limited_response = client.post("/api/commands/run", json={"command": "echo hello"}, headers=headers)
     assert limited_response.status_code == 429
     assert limited_response.get_json()["retry_after"] >= 1
+
+
+def test_process_kill_is_rate_limited(monkeypatch):
+    monkeypatch.setenv("DEVCONTROL_PASSWORD", "secret-123")
+    clear_security_state()
+    app = create_app(FakeRuntime())
+    client = app.test_client()
+    headers = {"X-DevControl-Password": "secret-123"}
+
+    for _ in range(10):
+        response = client.post("/api/processes/1234/kill", headers=headers)
+        assert response.status_code == 200
+
+    limited_response = client.post("/api/processes/1234/kill", headers=headers)
+    assert limited_response.status_code == 429
+    assert limited_response.get_json()["retry_after"] >= 1
+
+
+def test_port_delete_is_rate_limited(monkeypatch):
+    monkeypatch.setenv("DEVCONTROL_PASSWORD", "secret-123")
+    clear_security_state()
+    app = create_app(FakeRuntime())
+    client = app.test_client()
+    headers = {"X-DevControl-Password": "secret-123"}
+
+    for _ in range(10):
+        response = client.delete("/api/port/8080", headers=headers)
+        assert response.status_code == 200
+
+    limited_response = client.delete("/api/port/8080", headers=headers)
+    assert limited_response.status_code == 429
+    assert limited_response.get_json()["retry_after"] >= 1
+
+
+def test_auth_disabled_mode_allows_protected_actions_without_password(monkeypatch):
+    monkeypatch.delenv("DEVCONTROL_PASSWORD", raising=False)
+    clear_security_state()
+    app = create_app(FakeRuntime())
+    client = app.test_client()
+
+    response = client.post("/api/commands/run", json={"command": "echo no-password"})
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+
+
+def test_auth_disabled_mode_reports_enabled_false(monkeypatch):
+    monkeypatch.delenv("DEVCONTROL_PASSWORD", raising=False)
+    clear_security_state()
+    app = create_app(FakeRuntime())
+    client = app.test_client()
+
+    response = client.get("/api/auth/status")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["enabled"] is False
+    assert payload["session_active"] is False

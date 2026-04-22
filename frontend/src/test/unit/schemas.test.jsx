@@ -111,4 +111,56 @@ describe('dashboard schemas', () => {
     expect(parsed.entity_type).toBe('process');
     expect(parsed.severity).toBe('success');
   });
+
+  it('parses action events with retry_after for rate limiting', () => {
+    const parsed = actionEventSchema.parse({
+      action: 'kill_process',
+      status: 'error',
+      message: 'Rate limited',
+      severity: 'error',
+      entity_type: 'process',
+      entity_id: 100,
+      retry_after: 30,
+      requires_admin: false,
+      requires_password: true,
+      timestamp: 123
+    });
+
+    expect(parsed.retry_after).toBe(30);
+    expect(parsed.severity).toBe('error');
+  });
+
+  it('parses action events with admin requirement flag', () => {
+    const parsed = actionEventSchema.parse({
+      action: 'kill_process',
+      status: 'error',
+      message: 'Admin required',
+      severity: 'error',
+      entity_type: 'process',
+      entity_id: 100,
+      retry_after: null,
+      requires_admin: true,
+      requires_password: true,
+      timestamp: 123
+    });
+
+    expect(parsed.requires_admin).toBe(true);
+  });
+
+  it('parses action events with minimal required fields', () => {
+    const parsed = actionEventSchema.parse({
+      action: 'heartbeat',
+      status: 'ok'
+    });
+
+    expect(parsed.action).toBe('heartbeat');
+    expect(parsed.status).toBe('ok');
+  });
+
+  it('rejects malformed action events with invalid types', () => {
+    expect(() => actionEventSchema.parse({
+      action: 123,
+      status: 'ok'
+    })).toThrow();
+  });
 });

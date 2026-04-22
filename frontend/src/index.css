@@ -1050,8 +1050,15 @@ h3 {
   gap: 12px;
 }
 
+.readiness-card-top {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+
 .readiness-card-top .status-badge {
   flex-shrink: 0;
+  max-width: 100%;
   min-height: 28px;
   padding: 5px 10px;
   font-size: 10px;

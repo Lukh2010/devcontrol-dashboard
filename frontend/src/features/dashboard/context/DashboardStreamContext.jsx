@@ -117,7 +117,8 @@ export function DashboardStreamProvider({ children }) {
           ...prev,
           streamStatus: 'connected',
           reconnectAttempt: 0,
-          streamError: null
+          streamError: null,
+          lastUpdate: Date.now()
         }));
       };
 
@@ -130,7 +131,8 @@ export function DashboardStreamProvider({ children }) {
         let payload;
         try {
           payload = streamSystemSnapshotSchema.parse(JSON.parse(event.data || '{}'));
-        } catch {
+        } catch (parseError) {
+          console.error('[SSE] Malformed system_snapshot event:', parseError, event.data);
           setState((prev) => ({ ...prev, streamError: 'Malformed event: system_snapshot' }));
           return;
         }
@@ -153,7 +155,8 @@ export function DashboardStreamProvider({ children }) {
         let payload;
         try {
           payload = streamProcessSnapshotSchema.parse(JSON.parse(event.data || '{}'));
-        } catch {
+        } catch (parseError) {
+          console.error('[SSE] Malformed process_snapshot event:', parseError, event.data);
           setState((prev) => ({ ...prev, streamError: 'Malformed event: process_snapshot' }));
           return;
         }
@@ -171,7 +174,8 @@ export function DashboardStreamProvider({ children }) {
         let payload;
         try {
           payload = streamNetworkSnapshotSchema.parse(JSON.parse(event.data || '{}'));
-        } catch {
+        } catch (parseError) {
+          console.error('[SSE] Malformed network_snapshot event:', parseError, event.data);
           setState((prev) => ({ ...prev, streamError: 'Malformed event: network_snapshot' }));
           return;
         }
@@ -193,7 +197,8 @@ export function DashboardStreamProvider({ children }) {
         let payload;
         try {
           payload = actionEventSchema.parse(JSON.parse(event.data || '{}'));
-        } catch {
+        } catch (parseError) {
+          console.error('[SSE] Malformed action event:', parseError, event.data);
           setState((prev) => ({ ...prev, streamError: 'Malformed event: action' }));
           return;
         }
@@ -204,6 +209,14 @@ export function DashboardStreamProvider({ children }) {
             timestamp: payload.timestamp || Date.now(),
             ...payload
           };
+
+          // Keep list queries fresh when the backend reports successful state changes.
+          if (payload.action === 'kill_process' && payload.status === 'success') {
+            queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.processes });
+          }
+          if (payload.action === 'kill_by_port' && payload.status === 'success') {
+            queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.ports });
+          }
 
           return {
             ...prev,

@@ -12,6 +12,7 @@ from command_classifier import (
     contains_dangerous_shell_metachars,
 )
 from dashboard_pids import is_dashboard_pid
+from security import is_password_protection_enabled
 
 
 class ActionExecutorService:
@@ -406,11 +407,16 @@ class ActionExecutorService:
         entity_type: str | None = None,
         entity_id=None,
         requires_admin: bool = False,
-        requires_password: bool = True,
+        requires_password: bool | None = None,
         retry_after: int | None = None,
         **details,
     ):
         resolved_severity = severity or ("success" if status == "success" else "warning" if status == "pending" else "danger")
+        resolved_requires_password = (
+            is_password_protection_enabled()
+            if requires_password is None
+            else requires_password
+        )
         self.event_bus.publish("action", {
             "action": action,
             "status": status,
@@ -419,7 +425,7 @@ class ActionExecutorService:
             "entity_type": entity_type,
             "entity_id": entity_id,
             "requires_admin": requires_admin,
-            "requires_password": requires_password,
+            "requires_password": resolved_requires_password,
             "retry_after": retry_after,
             "timestamp": time.time(),
             **details

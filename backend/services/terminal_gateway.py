@@ -3,6 +3,7 @@ from http.cookies import SimpleCookie
 import json
 import os
 import threading
+import time
 
 from websockets import exceptions as websocket_exceptions
 from websockets.legacy.server import serve as websocket_serve
@@ -43,7 +44,8 @@ class TerminalGatewayService:
                     "type": "error",
                     "message": RATE_LIMITED_MESSAGE,
                     "reason": "rate_limited",
-                    "retry_after": retry_after
+                    "retry_after": retry_after,
+                    "requires_password": is_password_protection_enabled(),
                 }))
                 self._publish_terminal_state(
                     "rate_limited",
@@ -79,6 +81,7 @@ class TerminalGatewayService:
                     "type": "error",
                     "message": PROTECTED_ENDPOINTS_MESSAGE,
                     "reason": "unauthorized",
+                    "requires_password": password_enabled,
                     **({"retry_after": failure_retry_after} if not allowed_after_failure else {})
                 }))
                 self._publish_terminal_state(
@@ -147,43 +150,77 @@ class TerminalGatewayService:
             start_server = websocket_serve(self.handle_websocket, self.host, self.port)
             loop.run_until_complete(start_server)
             register_dashboard_pid("websocket", os.getpid())
-            self.event_bus.publish("action", {
-                "action": "terminal_server",
-                "status": "ready",
-                "message": f"Terminal gateway ready on 127.0.0.1:{self.port}",
-                "severity": "success",
-                "entity_type": "terminal_server",
-                "entity_id": self.port,
-                "port": self.port,
-            })
+            self._publish_action_event(
+                "terminal_server",
+                "ready",
+                message=f"Terminal gateway ready on 127.0.0.1:{self.port}",
+                severity="success",
+                entity_type="terminal_server",
+                entity_id=self.port,
+                port=self.port,
+                requires_password=is_password_protection_enabled(),
+            )
             print(f"WebSocket terminal server started on ws://localhost:{self.port}")
             loop.run_forever()
         except OSError as exc:
             message = str(exc)
-            self.event_bus.publish("action", {
-                "action": "terminal_server",
-                "status": "unavailable",
-                "message": message,
-                "severity": "danger",
-                "entity_type": "terminal_server",
-                "entity_id": self.port,
-                "port": self.port,
-                "reason": message
-            })
+            self._publish_action_event(
+                "terminal_server",
+                "unavailable",
+                message=message,
+                severity="danger",
+                entity_type="terminal_server",
+                entity_id=self.port,
+                port=self.port,
+                reason=message,
+                requires_password=is_password_protection_enabled(),
+            )
             if "address already in use" in message.lower() or "10048" in message:
                 print(f"WebSocket port {self.port} is unavailable: {message}")
             else:
                 raise
 
     def _publish_terminal_state(self, status, message: str | None = None, severity: str | None = None, **details):
+        self._publish_action_event(
+            "terminal_state",
+            status,
+            message=message or f"Terminal {status}",
+            severity=severity or ("success" if status == "connected" else "warning"),
+            entity_type="terminal",
+            entity_id=self.port,
+            **details,
+        )
+
+    def _publish_action_event(
+        self,
+        action: str,
+        status: str,
+        message: str,
+        severity: str,
+        entity_type: str,
+        entity_id,
+        requires_admin: bool = False,
+        requires_password: bool | None = None,
+        retry_after: int | None = None,
+        **details,
+    ):
+        resolved_requires_password = (
+            is_password_protection_enabled()
+            if requires_password is None
+            else requires_password
+        )
         self.event_bus.publish("action", {
-            "action": "terminal_state",
+            "action": action,
             "status": status,
-            "message": message or f"Terminal {status}",
-            "severity": severity or ("success" if status == "connected" else "warning"),
-            "entity_type": "terminal",
-            "entity_id": self.port,
-            **details
+            "message": message,
+            "severity": severity,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "requires_admin": requires_admin,
+            "requires_password": resolved_requires_password,
+            "retry_after": retry_after,
+            "timestamp": time.time(),
+            **details,
         })
 
     def _get_client_ip(self, websocket) -> str:

@@ -108,9 +108,15 @@ const WindowTerminal = ({
   const handleMessage = useCallback((message) => {
     switch (message.type) {
       case 'welcome':
+        wasConnectedRef.current = true;
+        setConnected(true);
+        setConnectionState('connected');
+        setConnectionMessage('Terminal connected and ready.');
+        setRetryUntil(null);
         setWorkingDir(message.working_dir);
         addOutput({ type: 'system', text: 'Connected to terminal server' });
         addOutput({ type: 'system', text: message.message });
+        wsRef.current?.send(JSON.stringify({ type: 'get_safe_commands' }));
         break;
       case 'cwd_changed':
         setWorkingDir(message.working_dir);
@@ -143,6 +149,7 @@ const WindowTerminal = ({
       case 'error':
         if (message.reason === 'rate_limited') {
           const retryAt = Date.now() + ((message.retry_after || 1) * 1000);
+          setConnected(false);
           setRetryUntil(retryAt);
           setConnectionState('rate_limited');
           setConnectionMessage(`Rate limited. Retry in about ${message.retry_after}s.`);
@@ -152,13 +159,15 @@ const WindowTerminal = ({
             message: `Terminal rate limited. Retry in ${message.retry_after}s.`,
             severity: 'warning',
             entity_type: 'terminal',
-            retry_after: message.retry_after
+            retry_after: message.retry_after,
+            requires_password: message.requires_password ?? false
           });
           break;
         }
 
         if (message.reason === 'unauthorized') {
           const state = wasConnectedRef.current ? 'session_expired' : 'unauthorized';
+          setConnected(false);
           setConnectionState(state);
           setConnectionMessage(
             state === 'session_expired'
@@ -178,7 +187,9 @@ const WindowTerminal = ({
               ? 'Terminal session expired.'
               : 'Terminal access blocked until control access is unlocked.',
             severity: 'warning',
-            entity_type: 'terminal'
+            entity_type: 'terminal',
+            retry_after: message.retry_after ?? null,
+            requires_password: message.requires_password ?? true
           });
           break;
         }
@@ -204,14 +215,11 @@ const WindowTerminal = ({
 
       websocket.onopen = () => {
         intentionalCloseRef.current = false;
-        reconnectStateRef.current = 'connected';
-        wasConnectedRef.current = true;
-        setConnected(true);
-        setConnectionState('connected');
-        setConnectionMessage('Terminal connected and ready.');
+        reconnectStateRef.current = 'authorizing';
+        setConnectionState('connecting');
+        setConnectionMessage('Authorizing terminal session.');
         setRetryUntil(null);
         wsRef.current = websocket;
-        websocket.send(JSON.stringify({ type: 'get_safe_commands' }));
       };
 
       websocket.onmessage = (event) => {

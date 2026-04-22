@@ -136,3 +136,42 @@ def test_parse_errors_return_400_without_shell_fallback(monkeypatch):
 
     assert response.status_code == 400
     assert "could not be parsed safely" in response.get_json()["error"].lower()
+
+
+def test_protected_endpoints_return_401_without_password(monkeypatch):
+    monkeypatch.setenv("DEVCONTROL_PASSWORD", "ci-password")
+    clear_security_state()
+    app = create_app(FakeRuntime())
+    client = app.test_client()
+
+    command_response = client.post("/api/commands/run", json={"command": "echo test"})
+    assert command_response.status_code == 401
+    assert "error" in command_response.get_json()
+
+    process_kill_response = client.post("/api/processes/1234/kill")
+    assert process_kill_response.status_code == 401
+    assert "error" in process_kill_response.get_json()
+
+    port_delete_response = client.delete("/api/port/8080")
+    assert port_delete_response.status_code == 401
+    assert "error" in port_delete_response.get_json()
+
+
+def test_protected_endpoints_return_401_with_wrong_password(monkeypatch):
+    monkeypatch.setenv("DEVCONTROL_PASSWORD", "ci-password")
+    clear_security_state()
+    app = create_app(FakeRuntime())
+    client = app.test_client()
+    headers = {"X-DevControl-Password": "wrong-password"}
+
+    command_response = client.post("/api/commands/run", json={"command": "echo test"}, headers=headers)
+    assert command_response.status_code == 401
+    assert "error" in command_response.get_json()
+
+    process_kill_response = client.post("/api/processes/1234/kill", headers=headers)
+    assert process_kill_response.status_code == 401
+    assert "error" in process_kill_response.get_json()
+
+    port_delete_response = client.delete("/api/port/8080", headers=headers)
+    assert port_delete_response.status_code == 401
+    assert "error" in port_delete_response.get_json()

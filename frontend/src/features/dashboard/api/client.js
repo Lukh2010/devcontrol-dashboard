@@ -43,9 +43,10 @@ async function parseJson(response) {
     const message = parsedError.success
       ? parsedError.data.error
       : payload.message || payload.error || `HTTP ${response.status}`;
+    const retryAfter = payload.retry_after ?? response.headers.get('Retry-After') ?? null;
     throw new ApiRequestError(message, {
       status: response.status,
-      retryAfter: payload.retry_after ?? null,
+      retryAfter: retryAfter ? parseInt(retryAfter, 10) : null,
       payload
     });
   }

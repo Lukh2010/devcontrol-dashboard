@@ -572,7 +572,6 @@ function AppContent() {
             <div className="hero-meta">
               {stale ? 'Telemetry needs refresh' : 'Telemetry pipeline is healthy'}
             </div>
-            <div className="hero-meta">UI and launch output now use `127.0.0.1` consistently.</div>
           </div>
         </section>
 
