@@ -9,7 +9,7 @@ import {
   collectExpandableProcessIds,
   compareProcesses,
   flattenProcessTree
-} from '../features/dashboard/lib/processTree';
+} from '../features/dashboard/utils/processTree';
 import ConfirmDialog from './ConfirmDialog';
 
 function formatMemory(memoryMb) {
