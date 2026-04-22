@@ -100,6 +100,10 @@ export function DashboardStreamProvider({ children }) {
     let source;
     let cancelled = false;
 
+    const markMalformedEvent = (eventType) => {
+      setState((prev) => ({ ...prev, streamError: `Malformed event: ${eventType}` }));
+    };
+
     const connect = () => {
       if (cancelled) return;
 
@@ -131,9 +135,8 @@ export function DashboardStreamProvider({ children }) {
         let payload;
         try {
           payload = streamSystemSnapshotSchema.parse(JSON.parse(event.data || '{}'));
-        } catch (parseError) {
-          console.error('[SSE] Malformed system_snapshot event:', parseError, event.data);
-          setState((prev) => ({ ...prev, streamError: 'Malformed event: system_snapshot' }));
+        } catch {
+          markMalformedEvent('system_snapshot');
           return;
         }
         if (payload.system_info) {
@@ -155,9 +158,8 @@ export function DashboardStreamProvider({ children }) {
         let payload;
         try {
           payload = streamProcessSnapshotSchema.parse(JSON.parse(event.data || '{}'));
-        } catch (parseError) {
-          console.error('[SSE] Malformed process_snapshot event:', parseError, event.data);
-          setState((prev) => ({ ...prev, streamError: 'Malformed event: process_snapshot' }));
+        } catch {
+          markMalformedEvent('process_snapshot');
           return;
         }
         if (payload.processes) {
@@ -174,9 +176,8 @@ export function DashboardStreamProvider({ children }) {
         let payload;
         try {
           payload = streamNetworkSnapshotSchema.parse(JSON.parse(event.data || '{}'));
-        } catch (parseError) {
-          console.error('[SSE] Malformed network_snapshot event:', parseError, event.data);
-          setState((prev) => ({ ...prev, streamError: 'Malformed event: network_snapshot' }));
+        } catch {
+          markMalformedEvent('network_snapshot');
           return;
         }
         if (payload.ports) {
@@ -197,9 +198,8 @@ export function DashboardStreamProvider({ children }) {
         let payload;
         try {
           payload = actionEventSchema.parse(JSON.parse(event.data || '{}'));
-        } catch (parseError) {
-          console.error('[SSE] Malformed action event:', parseError, event.data);
-          setState((prev) => ({ ...prev, streamError: 'Malformed event: action' }));
+        } catch {
+          markMalformedEvent('action');
           return;
         }
         setState((prev) => {

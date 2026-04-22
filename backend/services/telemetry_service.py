@@ -4,6 +4,7 @@ import socket
 import subprocess
 import threading
 import time
+from datetime import datetime, timezone
 
 import psutil
 
@@ -250,6 +251,8 @@ class TelemetryCollectorService:
                 "exe_path": record.get("exe_path"),
                 "command_line": record.get("command_line"),
                 "started_at": record.get("started_at"),
+                "inventory_source": "command",
+                "inventory_degraded": False,
             }, is_admin)
 
             if dashboard_only and not process_entry["dashboard_owned"]:
@@ -285,7 +288,7 @@ class TelemetryCollectorService:
         is_admin = self.collect_is_admin()
         normalized_search = (search or "").strip().lower()
         processes = []
-        for proc in psutil.process_iter(["pid", "name", "memory_info", "status"]):
+        for proc in psutil.process_iter(["pid", "ppid", "name", "memory_info", "status", "username", "exe", "cmdline", "create_time"]):
             try:
                 pinfo = proc.info
                 cpu_percent = self._cpu_cache.get(proc.pid, 0.0) if self._cpu_cache_ready else 0.0
@@ -293,10 +296,17 @@ class TelemetryCollectorService:
                 if pinfo["name"] and pinfo["name"] != "System Idle Process":
                     process_entry = self._build_process_entry({
                         "pid": pinfo["pid"],
+                        "parent_pid": pinfo.get("ppid") or 0,
                         "name": pinfo["name"] or "Unknown",
                         "cpu_percent": round(cpu_percent, 2),
                         "memory_mb": round(memory_mb, 2),
-                        "status": pinfo["status"]
+                        "status": pinfo["status"],
+                        "username": pinfo.get("username"),
+                        "exe_path": pinfo.get("exe"),
+                        "command_line": self._normalize_cmdline(pinfo.get("cmdline")),
+                        "started_at": self._format_started_at(pinfo.get("create_time")),
+                        "inventory_source": "psutil_fallback",
+                        "inventory_degraded": True,
                     }, is_admin)
 
                     if dashboard_only and not process_entry["dashboard_owned"]:
@@ -363,6 +373,8 @@ class TelemetryCollectorService:
                 "remote_address": record.get("remote_address"),
                 "state": record.get("state"),
                 "exe_path": record.get("exe_path"),
+                "inventory_source": "command",
+                "inventory_degraded": False,
             }, is_admin)
 
             if dashboard_only and not port_entry["dashboard_owned"]:
@@ -408,7 +420,14 @@ class TelemetryCollectorService:
                             "port": conn.laddr.port,
                             "process_name": process.name(),
                             "pid": conn.pid,
-                            "status": conn.status
+                            "status": conn.status,
+                            "protocol": "tcp",
+                            "local_address": self._extract_address_host(conn.laddr),
+                            "remote_address": self._extract_address_host(conn.raddr),
+                            "state": conn.status,
+                            "exe_path": self._safe_process_exe(process),
+                            "inventory_source": "psutil_fallback",
+                            "inventory_degraded": True,
                         }, is_admin)
 
                         if dashboard_only and not port_entry["dashboard_owned"]:
@@ -483,10 +502,59 @@ class TelemetryCollectorService:
         }
 
     def collect_process_snapshot(self):
-        return {"processes": self.collect_processes(limit=25)}
+        processes = self.collect_processes(limit=25)
+        return {
+            "processes": processes,
+            "inventory_source": self._resolve_inventory_source(processes),
+            "inventory_degraded": self._resolve_inventory_degraded(processes),
+        }
 
     def collect_network_snapshot(self):
+        ports = self.collect_ports(limit=25)
         return {
-            "ports": self.collect_ports(limit=25),
+            "ports": ports,
+            "inventory_source": self._resolve_inventory_source(ports),
+            "inventory_degraded": self._resolve_inventory_degraded(ports),
             "network_info": self.collect_network_info()
         }
+
+    def _resolve_inventory_source(self, entries: list[dict]) -> str:
+        if not entries:
+            return "unknown"
+        return str(entries[0].get("inventory_source") or "unknown")
+
+    def _resolve_inventory_degraded(self, entries: list[dict]) -> bool:
+        return any(bool(entry.get("inventory_degraded")) for entry in entries)
+
+    def _normalize_cmdline(self, cmdline) -> str | None:
+        if isinstance(cmdline, str):
+            normalized = cmdline.strip()
+            return normalized or None
+        if isinstance(cmdline, (list, tuple)):
+            normalized = " ".join(str(part).strip() for part in cmdline if str(part).strip())
+            return normalized or None
+        return None
+
+    def _format_started_at(self, create_time) -> str | None:
+        try:
+            if not create_time:
+                return None
+            return datetime.fromtimestamp(float(create_time), tz=timezone.utc).isoformat()
+        except (TypeError, ValueError, OSError):
+            return None
+
+    def _extract_address_host(self, address) -> str | None:
+        if not address:
+            return None
+        if hasattr(address, "ip"):
+            return address.ip
+        if isinstance(address, tuple) and address:
+            return str(address[0])
+        return None
+
+    def _safe_process_exe(self, process) -> str | None:
+        try:
+            executable = process.exe()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+            return None
+        return executable or None

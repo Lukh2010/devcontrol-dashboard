@@ -61,6 +61,28 @@ describe('dashboard schemas', () => {
     ])).toThrow();
   });
 
+  it('parses enriched process payloads with hierarchy and inventory metadata', () => {
+    const parsed = processesSchema.parse([
+      {
+        pid: 501,
+        parent_pid: 500,
+        name: 'worker.exe',
+        cpu_percent: 12.4,
+        memory_mb: 128,
+        status: 'running',
+        username: 'lukas',
+        exe_path: 'C:/Apps/worker.exe',
+        command_line: 'worker.exe --serve',
+        started_at: '2026-04-22T10:15:00+00:00',
+        inventory_source: 'command',
+        inventory_degraded: false
+      }
+    ]);
+
+    expect(parsed[0].parent_pid).toBe(500);
+    expect(parsed[0].inventory_source).toBe('command');
+  });
+
   it('parses network info with mixed addresses', () => {
     const parsed = networkInfoSchema.parse({
       interfaces: {

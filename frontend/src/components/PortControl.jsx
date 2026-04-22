@@ -18,6 +18,22 @@ function formatUpdatedAt(timestamp) {
   });
 }
 
+function formatPortSourceLabel(portInfo) {
+  if (portInfo.inventory_degraded) {
+    return 'Fallback';
+  }
+
+  if (portInfo.inventory_source === 'command') {
+    return 'Command';
+  }
+
+  if (portInfo.inventory_source === 'psutil_fallback') {
+    return 'Fallback';
+  }
+
+  return 'Unknown';
+}
+
 const PortControl = ({
   ports,
   loading,
@@ -38,7 +54,7 @@ const PortControl = ({
   const queryOptions = useMemo(() => ({
     search: deferredSearch.trim(),
     sort,
-    limit: 200,
+    limit: 500,
     dashboard_only: dashboardOnly,
     killable_only: killableOnly
   }), [dashboardOnly, deferredSearch, killableOnly, sort]);
@@ -186,6 +202,7 @@ const PortControl = ({
                   <tr>
                     <th>Port</th>
                     <th>Process</th>
+                    <th>Listener</th>
                     <th>PID</th>
                     <th>Ownership</th>
                     <th>Action</th>
@@ -198,7 +215,19 @@ const PortControl = ({
                       <td>
                         <div className="process-cell-stack">
                           <strong>{portInfo.process_name}</strong>
-                          <span className="muted-note">{portInfo.kill_reason || 'Managed listener'}</span>
+                          <div className="process-chip-row">
+                            <span className={`status-pill ${portInfo.inventory_degraded ? 'warn' : 'neutral'}`}>
+                              {formatPortSourceLabel(portInfo)}
+                            </span>
+                            {portInfo.protocol ? <span className="status-pill neutral">{portInfo.protocol}</span> : null}
+                          </div>
+                          <span className="muted-note">{portInfo.exe_path || portInfo.kill_reason || 'Managed listener'}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="process-cell-stack">
+                          <strong>{portInfo.local_address || 'Unknown host'}</strong>
+                          <span className="muted-note">{portInfo.state || portInfo.status}</span>
                         </div>
                       </td>
                       <td>{portInfo.pid}</td>
@@ -238,6 +267,16 @@ const PortControl = ({
                     <span className={`status-badge ${portInfo.killable ? 'status-success' : 'status-warning'}`}>
                       {portInfo.killable ? 'Killable' : 'Blocked'}
                     </span>
+                  </div>
+                  <div className="process-chip-row">
+                    <span className={`status-pill ${portInfo.inventory_degraded ? 'warn' : 'neutral'}`}>
+                      {formatPortSourceLabel(portInfo)}
+                    </span>
+                    {portInfo.protocol ? <span className="status-pill neutral">{portInfo.protocol}</span> : null}
+                  </div>
+                  <div className="explorer-metrics">
+                    <span>{portInfo.local_address || 'Unknown host'}</span>
+                    <span>{portInfo.state || portInfo.status}</span>
                   </div>
                   <div className="muted-note wrap-text">{portInfo.kill_reason || 'Dashboard-owned listener.'}</div>
                   <button

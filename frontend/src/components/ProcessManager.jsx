@@ -1,9 +1,15 @@
-import React, { useDeferredValue, useMemo, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Cpu, RefreshCw, Search, Shield, Trash2 } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Cpu, RefreshCw, Search, Shield, Trash2 } from 'lucide-react';
 
 import { dashboardQueryKeys, fetchProcesses } from '../features/dashboard/api/client';
 import { useKillProcessMutation } from '../features/dashboard/hooks/useActionMutations';
+import {
+  buildVisibleProcessTree,
+  collectExpandableProcessIds,
+  compareProcesses,
+  flattenProcessTree
+} from '../features/dashboard/lib/processTree';
 import ConfirmDialog from './ConfirmDialog';
 
 function formatMemory(memoryMb) {
@@ -26,6 +32,30 @@ function formatUpdatedAt(timestamp) {
   });
 }
 
+function formatInventoryLabel(process) {
+  if (process.inventory_degraded) {
+    return 'Fallback';
+  }
+
+  if (process.inventory_source === 'command') {
+    return 'Command';
+  }
+
+  if (process.inventory_source === 'psutil_fallback') {
+    return 'Fallback';
+  }
+
+  return 'Unknown';
+}
+
+function buildProcessLabel(node) {
+  if (!node.children.length) {
+    return node.process.name;
+  }
+
+  return `${node.process.name} (${node.groupSize})`;
+}
+
 const ProcessManager = ({
   processes,
   loading,
@@ -43,6 +73,7 @@ const ProcessManager = ({
   const [highMemoryOnly, setHighMemoryOnly] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [pendingProcess, setPendingProcess] = useState(null);
+  const [expandedProcessIds, setExpandedProcessIds] = useState(() => new Set());
 
   const deferredSearch = useDeferredValue(search);
   const killProcessMutation = useKillProcessMutation('');
@@ -50,7 +81,7 @@ const ProcessManager = ({
   const queryOptions = useMemo(() => ({
     search: deferredSearch.trim(),
     sort,
-    limit: 200,
+    limit: 500,
     dashboard_only: dashboardOnly,
     killable_only: killableOnly
   }), [dashboardOnly, deferredSearch, killableOnly, sort]);
@@ -62,10 +93,11 @@ const ProcessManager = ({
     staleTime: 5000
   });
 
-  const visibleProcesses = useMemo(() => {
-    const source = processQuery.data ?? processes ?? [];
-
-    return source.filter((process) => {
+  const allProcesses = useMemo(
+    () => processQuery.data ?? processes ?? [],
+    [processQuery.data, processes]
+  );
+  const matchesLocalFilters = useMemo(() => (process) => {
       if (highCpuOnly && process.cpu_percent < 50) {
         return false;
       }
@@ -79,31 +111,73 @@ const ProcessManager = ({
       }
 
       return true;
+    }, [highCpuOnly, highMemoryOnly, statusFilter]);
+
+  const matchingProcesses = useMemo(() => (
+    allProcesses.filter(matchesLocalFilters)
+  ), [allProcesses, matchesLocalFilters]);
+
+  const processTree = useMemo(() => (
+    buildVisibleProcessTree(allProcesses, {
+      sort,
+      filterFn: matchesLocalFilters
+    })
+  ), [allProcesses, matchesLocalFilters, sort]);
+
+  const autoExpandTree = Boolean(deferredSearch.trim() || highCpuOnly || highMemoryOnly || statusFilter !== 'all');
+
+  const flatRows = useMemo(() => (
+    flattenProcessTree(processTree, expandedProcessIds, autoExpandTree)
+  ), [autoExpandTree, expandedProcessIds, processTree]);
+
+  useEffect(() => {
+    const validExpandableIds = new Set(collectExpandableProcessIds(processTree));
+    setExpandedProcessIds((current) => {
+      const next = new Set([...current].filter((pid) => validExpandableIds.has(pid)));
+      if (next.size === current.size) {
+        return current;
+      }
+      return next;
     });
-  }, [highCpuOnly, highMemoryOnly, processQuery.data, processes, statusFilter]);
+  }, [processTree]);
 
   const statusOptions = useMemo(() => {
-    const statuses = new Set((processQuery.data ?? processes ?? []).map((process) => process.status));
+    const statuses = new Set(allProcesses.map((process) => process.status));
     return ['all', ...statuses];
-  }, [processQuery.data, processes]);
+  }, [allProcesses]);
 
   const processSummary = useMemo(() => {
-    if (!visibleProcesses.length) {
+    if (!matchingProcesses.length) {
       return {
         total: 0,
         hottest: 'No data',
-        avgCpu: '0.0%'
+        avgCpu: '0.0%',
+        source: 'Unknown'
       };
     }
 
-    const totalCpu = visibleProcesses.reduce((sum, process) => sum + process.cpu_percent, 0);
+    const totalCpu = matchingProcesses.reduce((sum, process) => sum + process.cpu_percent, 0);
+    const hottestProcess = [...matchingProcesses].sort((left, right) => compareProcesses(left, right, sort))[0];
 
     return {
-      total: visibleProcesses.length,
-      hottest: visibleProcesses[0]?.name || 'Unknown',
-      avgCpu: `${(totalCpu / visibleProcesses.length).toFixed(1)}%`
+      total: matchingProcesses.length,
+      hottest: hottestProcess?.name || 'Unknown',
+      avgCpu: `${(totalCpu / matchingProcesses.length).toFixed(1)}%`,
+      source: formatInventoryLabel(hottestProcess || matchingProcesses[0])
     };
-  }, [visibleProcesses]);
+  }, [matchingProcesses, sort]);
+
+  const toggleProcessGroup = (pid) => {
+    setExpandedProcessIds((current) => {
+      const next = new Set(current);
+      if (next.has(pid)) {
+        next.delete(pid);
+      } else {
+        next.add(pid);
+      }
+      return next;
+    });
+  };
 
   const requestKill = (process) => {
     if (passwordProtectionEnabled && !authUnlocked) {
@@ -153,7 +227,7 @@ const ProcessManager = ({
     }
   };
 
-  const tableLoading = (loading || processQuery.isLoading) && !visibleProcesses.length;
+  const tableLoading = (loading || processQuery.isLoading) && !flatRows.length;
 
   return (
     <section className="panel">
@@ -209,6 +283,13 @@ const ProcessManager = ({
             </div>
             <RefreshCw size={18} />
           </div>
+          <div className="summary-strip">
+            <div>
+              <div className="summary-label">Inventory</div>
+              <div className="summary-value">{processSummary.source}</div>
+            </div>
+            <Shield size={18} />
+          </div>
         </div>
 
         <div className="table-controls">
@@ -260,7 +341,7 @@ const ProcessManager = ({
         </div>
 
         <div className="toolbar-meta muted-note">
-          {visibleProcesses.length} results • last refresh {formatUpdatedAt(processQuery.dataUpdatedAt)}
+          {matchingProcesses.length} matching processes • {flatRows.length} rows visible • last refresh {formatUpdatedAt(processQuery.dataUpdatedAt)}
         </div>
 
         {!isAdmin ? (
@@ -277,7 +358,7 @@ const ProcessManager = ({
             <div className="skeleton-line" />
             <div className="skeleton-line" />
           </div>
-        ) : visibleProcesses.length === 0 ? (
+        ) : flatRows.length === 0 ? (
           <div className="center-empty">
             <div>
               <p className="metric-reading compact-reading">No matching processes</p>
@@ -300,12 +381,40 @@ const ProcessManager = ({
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleProcesses.map((process) => (
+                  {flatRows.map((node) => {
+                    const process = node.process;
+                    const expanded = autoExpandTree || expandedProcessIds.has(process.pid);
+                    const processLabel = buildProcessLabel(node);
+                    const secondaryLine = process.command_line || process.exe_path || process.kill_reason || 'Ready for inspection';
+
+                    return (
                     <tr key={process.pid}>
                       <td>
                         <div className="process-cell-stack">
-                          <strong>{process.name}</strong>
-                          <span className="muted-note">{process.kill_reason || 'Ready for inspection'}</span>
+                          <div className="process-tree-row" style={{ paddingLeft: `${node.level * 18}px` }}>
+                            {node.children.length ? (
+                              <button
+                                className="process-tree-toggle"
+                                type="button"
+                                onClick={() => toggleProcessGroup(process.pid)}
+                                aria-label={expanded ? `Collapse ${process.name}` : `Expand ${process.name}`}
+                              >
+                                {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                              </button>
+                            ) : (
+                              <span className="process-tree-spacer" aria-hidden="true" />
+                            )}
+                            <div className="process-cell-stack">
+                              <strong>{processLabel}</strong>
+                              <div className="process-chip-row">
+                                <span className={`status-pill ${process.inventory_degraded ? 'warn' : 'neutral'}`}>
+                                  {formatInventoryLabel(process)}
+                                </span>
+                                {process.username ? <span className="status-pill neutral">{process.username}</span> : null}
+                              </div>
+                              <span className="muted-note wrap-text">{secondaryLine}</span>
+                            </div>
+                          </div>
                         </div>
                       </td>
                       <td>{process.pid}</td>
@@ -334,18 +443,41 @@ const ProcessManager = ({
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  );})}
                 </tbody>
               </table>
             </div>
 
             <div className="mobile-card-list">
-              {visibleProcesses.map((process) => (
-                <div key={`mobile-${process.pid}`} className="mini-card explorer-card">
+              {flatRows.map((node) => {
+                const process = node.process;
+                const expanded = autoExpandTree || expandedProcessIds.has(process.pid);
+                return (
+                <div
+                  key={`mobile-${process.pid}`}
+                  className="mini-card explorer-card"
+                  style={{ marginLeft: `${node.level * 12}px` }}
+                >
                   <div className="explorer-card-top">
-                    <div>
-                      <div className="action-feed-title">{process.name}</div>
-                      <div className="muted-note">PID {process.pid}</div>
+                    <div className="process-mobile-heading">
+                      <div className="process-tree-row">
+                        {node.children.length ? (
+                          <button
+                            className="process-tree-toggle"
+                            type="button"
+                            onClick={() => toggleProcessGroup(process.pid)}
+                            aria-label={expanded ? `Collapse ${process.name}` : `Expand ${process.name}`}
+                          >
+                            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                          </button>
+                        ) : (
+                          <span className="process-tree-spacer" aria-hidden="true" />
+                        )}
+                        <div>
+                          <div className="action-feed-title">{buildProcessLabel(node)}</div>
+                          <div className="muted-note">PID {process.pid}</div>
+                        </div>
+                      </div>
                     </div>
                     <span className={`status-badge ${process.killable ? 'status-success' : 'status-warning'}`}>
                       {process.killable ? 'Killable' : 'Blocked'}
@@ -356,7 +488,13 @@ const ProcessManager = ({
                     <span>{formatMemory(process.memory_mb)}</span>
                     <span>{process.status}</span>
                   </div>
-                  <div className="muted-note wrap-text">{process.kill_reason || 'Dashboard-owned process.'}</div>
+                  <div className="process-chip-row">
+                    <span className={`status-pill ${process.inventory_degraded ? 'warn' : 'neutral'}`}>
+                      {formatInventoryLabel(process)}
+                    </span>
+                    {process.username ? <span className="status-pill neutral">{process.username}</span> : null}
+                  </div>
+                  <div className="muted-note wrap-text">{process.command_line || process.exe_path || process.kill_reason || 'Dashboard-owned process.'}</div>
                   <button
                     className="danger-button"
                     type="button"
@@ -367,7 +505,7 @@ const ProcessManager = ({
                     Stop
                   </button>
                 </div>
-              ))}
+              );})}
             </div>
           </>
         )}

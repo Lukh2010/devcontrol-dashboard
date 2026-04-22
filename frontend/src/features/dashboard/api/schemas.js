@@ -60,6 +60,13 @@ export const portSchema = z.object({
   process_name: z.string(),
   pid: z.number(),
   status: z.string(),
+  protocol: z.string().optional(),
+  local_address: z.string().nullable().optional(),
+  remote_address: z.string().nullable().optional(),
+  state: z.string().nullable().optional(),
+  exe_path: z.string().nullable().optional(),
+  inventory_source: z.string().optional(),
+  inventory_degraded: z.boolean().optional(),
   dashboard_owned: z.boolean().optional(),
   killable: z.boolean().optional(),
   kill_reason: z.string().nullable().optional()
@@ -71,6 +78,13 @@ export const processSchema = z.object({
   cpu_percent: z.number(),
   memory_mb: z.number(),
   status: z.string(),
+  parent_pid: z.number().optional(),
+  username: z.string().nullable().optional(),
+  exe_path: z.string().nullable().optional(),
+  command_line: z.string().nullable().optional(),
+  started_at: z.string().nullable().optional(),
+  inventory_source: z.string().optional(),
+  inventory_degraded: z.boolean().optional(),
   dashboard_owned: z.boolean().optional(),
   killable: z.boolean().optional(),
   kill_reason: z.string().nullable().optional()
@@ -123,11 +137,15 @@ export const streamSystemSnapshotSchema = z.object({
 
 export const streamProcessSnapshotSchema = z.object({
   processes: processesSchema.optional(),
+  inventory_source: z.string().optional(),
+  inventory_degraded: z.boolean().optional(),
   timestamp: z.number().optional()
 });
 
 export const streamNetworkSnapshotSchema = z.object({
   ports: portsSchema.optional(),
+  inventory_source: z.string().optional(),
+  inventory_degraded: z.boolean().optional(),
   network_info: networkInfoSchema.optional(),
   timestamp: z.number().optional()
 });

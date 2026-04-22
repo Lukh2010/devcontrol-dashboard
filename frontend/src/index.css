@@ -947,6 +947,50 @@ h3 {
   min-width: 0;
 }
 
+.process-tree-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.process-tree-toggle {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgba(146, 172, 211, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.process-tree-toggle:hover {
+  border-color: rgba(79, 209, 197, 0.28);
+  color: var(--text);
+}
+
+.process-tree-spacer {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.process-chip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.process-mobile-heading {
+  min-width: 0;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
