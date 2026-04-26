@@ -134,7 +134,7 @@ const ProcessManager = ({
 
   const deferredSearch = useDeferredValue(search);
   const killProcessMutation = useKillProcessMutation('');
-  const allProcesses = processes ?? [];
+  const allProcesses = useMemo(() => processes ?? [], [processes]);
 
   const matchesLocalFilters = useMemo(() => {
     const normalizedSearch = deferredSearch.trim().toLowerCase();

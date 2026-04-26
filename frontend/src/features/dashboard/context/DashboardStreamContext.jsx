@@ -158,9 +158,8 @@ export function DashboardStreamProvider({ children }) {
         if (!rememberEventId(event)) {
           return;
         }
-        let payload;
         try {
-          payload = streamProcessSnapshotSchema.parse(JSON.parse(event.data || '{}'));
+          streamProcessSnapshotSchema.parse(JSON.parse(event.data || '{}'));
         } catch {
           markMalformedEvent('process_snapshot');
           return;
