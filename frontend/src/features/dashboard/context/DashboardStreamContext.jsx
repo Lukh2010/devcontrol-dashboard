@@ -3,9 +3,8 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import {
   dashboardQueryKeys,
-  fetchNetworkInfo,
-  fetchPorts,
-  fetchProcesses
+  portsQueryOptions,
+  processesQueryOptions
 } from '../api/client';
 import {
   actionEventSchema,
@@ -17,12 +16,6 @@ import {
 const DashboardStreamContext = createContext(null);
 
 const initialState = {
-  systemInfo: null,
-  performanceData: null,
-  ports: [],
-  processes: [],
-  networkInfo: null,
-  isAdmin: false,
   terminalState: 'unknown',
   lastAction: null,
   actionFeed: [],
@@ -41,33 +34,7 @@ export function DashboardStreamProvider({ children }) {
   const queryClient = useQueryClient();
   const reconnectTimerRef = useRef(null);
   const reconnectAttemptRef = useRef(0);
-
-  const refreshProcesses = useCallback(async () => {
-    const data = await queryClient.fetchQuery({
-      queryKey: dashboardQueryKeys.processes,
-      queryFn: fetchProcesses
-    });
-    setState((prev) => ({ ...prev, processes: data, lastUpdate: Date.now() }));
-    return data;
-  }, [queryClient]);
-
-  const refreshPorts = useCallback(async () => {
-    const data = await queryClient.fetchQuery({
-      queryKey: dashboardQueryKeys.ports,
-      queryFn: fetchPorts
-    });
-    setState((prev) => ({ ...prev, ports: data, lastUpdate: Date.now() }));
-    return data;
-  }, [queryClient]);
-
-  const refreshNetwork = useCallback(async () => {
-    const data = await queryClient.fetchQuery({
-      queryKey: dashboardQueryKeys.networkInfo,
-      queryFn: fetchNetworkInfo
-    });
-    setState((prev) => ({ ...prev, networkInfo: data, lastUpdate: Date.now() }));
-    return data;
-  }, [queryClient]);
+  const lastEventIdRef = useRef(null);
 
   const recordUiAction = useCallback((action) => {
     const normalizedAction = {
@@ -104,6 +71,26 @@ export function DashboardStreamProvider({ children }) {
       setState((prev) => ({ ...prev, streamError: `Malformed event: ${eventType}` }));
     };
 
+    const rememberEventId = (event) => {
+      const rawEventId = event?.lastEventId;
+      if (!rawEventId) {
+        return true;
+      }
+
+      const nextEventId = Number(rawEventId);
+      const previousEventId = Number(lastEventIdRef.current);
+      if (
+        Number.isFinite(nextEventId)
+        && Number.isFinite(previousEventId)
+        && nextEventId <= previousEventId
+      ) {
+        return false;
+      }
+
+      lastEventIdRef.current = rawEventId;
+      return true;
+    };
+
     const connect = () => {
       if (cancelled) return;
 
@@ -113,7 +100,10 @@ export function DashboardStreamProvider({ children }) {
         streamError: null
       }));
 
-      source = new EventSource('/api/events/stream');
+      const streamUrl = lastEventIdRef.current
+        ? `/api/events/stream?last_event_id=${encodeURIComponent(lastEventIdRef.current)}`
+        : '/api/events/stream';
+      source = new EventSource(streamUrl);
 
       source.onopen = () => {
         reconnectAttemptRef.current = 0;
@@ -126,12 +116,18 @@ export function DashboardStreamProvider({ children }) {
         }));
       };
 
-      source.addEventListener('heartbeat', () => {
+      source.addEventListener('heartbeat', (event) => {
+        if (!rememberEventId(event)) {
+          return;
+        }
         const now = Date.now();
         setState((prev) => ({ ...prev, lastHeartbeat: now }));
       });
 
       source.addEventListener('system_snapshot', (event) => {
+        if (!rememberEventId(event)) {
+          return;
+        }
         let payload;
         try {
           payload = streamSystemSnapshotSchema.parse(JSON.parse(event.data || '{}'));
@@ -145,16 +141,23 @@ export function DashboardStreamProvider({ children }) {
         if (payload.performance) {
           queryClient.setQueryData(dashboardQueryKeys.systemPerformance, payload.performance);
         }
+        if (typeof payload.is_admin === 'boolean') {
+          const previousAdminState = queryClient.getQueryData(dashboardQueryKeys.systemAdmin);
+          queryClient.setQueryData(dashboardQueryKeys.systemAdmin, {
+            is_admin: payload.is_admin,
+            platform: payload.system_info?.platform || previousAdminState?.platform || 'unknown'
+          });
+        }
         setState((prev) => ({
           ...prev,
-          systemInfo: payload.system_info || prev.systemInfo,
-          performanceData: payload.performance || prev.performanceData,
-          isAdmin: typeof payload.is_admin === 'boolean' ? payload.is_admin : prev.isAdmin,
           lastUpdate: Date.now()
         }));
       });
 
       source.addEventListener('process_snapshot', (event) => {
+        if (!rememberEventId(event)) {
+          return;
+        }
         let payload;
         try {
           payload = streamProcessSnapshotSchema.parse(JSON.parse(event.data || '{}'));
@@ -162,17 +165,17 @@ export function DashboardStreamProvider({ children }) {
           markMalformedEvent('process_snapshot');
           return;
         }
-        if (payload.processes) {
-          queryClient.setQueryData(dashboardQueryKeys.processes, payload.processes);
-        }
+        void queryClient.fetchQuery(processesQueryOptions()).catch(() => undefined);
         setState((prev) => ({
           ...prev,
-          processes: payload.processes || prev.processes,
           lastUpdate: Date.now()
         }));
       });
 
       source.addEventListener('network_snapshot', (event) => {
+        if (!rememberEventId(event)) {
+          return;
+        }
         let payload;
         try {
           payload = streamNetworkSnapshotSchema.parse(JSON.parse(event.data || '{}'));
@@ -180,21 +183,20 @@ export function DashboardStreamProvider({ children }) {
           markMalformedEvent('network_snapshot');
           return;
         }
-        if (payload.ports) {
-          queryClient.setQueryData(dashboardQueryKeys.ports, payload.ports);
-        }
         if (payload.network_info) {
           queryClient.setQueryData(dashboardQueryKeys.networkInfo, payload.network_info);
         }
+        void queryClient.fetchQuery(portsQueryOptions()).catch(() => undefined);
         setState((prev) => ({
           ...prev,
-          ports: payload.ports || prev.ports,
-          networkInfo: payload.network_info || prev.networkInfo,
           lastUpdate: Date.now()
         }));
       });
 
       source.addEventListener('action', (event) => {
+        if (!rememberEventId(event)) {
+          return;
+        }
         let payload;
         try {
           payload = actionEventSchema.parse(JSON.parse(event.data || '{}'));
@@ -212,10 +214,10 @@ export function DashboardStreamProvider({ children }) {
 
           // Keep list queries fresh when the backend reports successful state changes.
           if (payload.action === 'kill_process' && payload.status === 'success') {
-            queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.processes });
+            void queryClient.fetchQuery(processesQueryOptions()).catch(() => undefined);
           }
           if (payload.action === 'kill_by_port' && payload.status === 'success') {
-            queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.ports });
+            void queryClient.fetchQuery(portsQueryOptions()).catch(() => undefined);
           }
 
           return {
@@ -229,6 +231,26 @@ export function DashboardStreamProvider({ children }) {
             lastUpdate: Date.now()
           };
         });
+      });
+
+      source.addEventListener('stream_error', (event) => {
+        if (!rememberEventId(event)) {
+          return;
+        }
+
+        let payload;
+        try {
+          payload = JSON.parse(event.data || '{}');
+        } catch {
+          markMalformedEvent('stream_error');
+          return;
+        }
+
+        setState((prev) => ({
+          ...prev,
+          streamError: payload.message || payload.reason || 'Live stream error',
+          lastUpdate: Date.now()
+        }));
       });
 
       source.onerror = () => {
@@ -271,12 +293,9 @@ export function DashboardStreamProvider({ children }) {
   const value = useMemo(() => ({
     ...state,
     stale,
-    refreshProcesses,
-    refreshPorts,
-    refreshNetwork,
     recordUiAction,
     dismissNotice
-  }), [dismissNotice, recordUiAction, refreshNetwork, refreshPorts, refreshProcesses, stale, state]);
+  }), [dismissNotice, recordUiAction, stale, state]);
 
   return (
     <DashboardStreamContext.Provider value={value}>

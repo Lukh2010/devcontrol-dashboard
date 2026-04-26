@@ -1,8 +1,6 @@
 import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, ChevronDown, ChevronRight, Cpu, RefreshCw, Search, Shield, Trash2 } from 'lucide-react';
 
-import { dashboardQueryKeys, fetchProcesses } from '../features/dashboard/api/client';
 import { useKillProcessMutation } from '../features/dashboard/hooks/useActionMutations';
 import {
   buildVisibleProcessTree,
@@ -96,10 +94,31 @@ function getDisplayedMemoryMb(node, expanded) {
   return node.ownMemoryMb ?? node.process.memory_mb ?? 0;
 }
 
+function matchesSearch(process, value) {
+  if (!value) {
+    return true;
+  }
+
+  const haystack = [
+    process.name,
+    process.pid,
+    process.command_line,
+    process.exe_path,
+    process.username
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return haystack.includes(value);
+}
+
 const ProcessManager = ({
   processes,
   loading,
   isAdmin,
+  isRefreshing = false,
+  lastUpdatedAt = null,
   authUnlocked,
   passwordProtectionEnabled,
   onRefresh,
@@ -115,33 +134,31 @@ const ProcessManager = ({
 
   const deferredSearch = useDeferredValue(search);
   const killProcessMutation = useKillProcessMutation('');
+  const allProcesses = processes ?? [];
 
-  const queryOptions = useMemo(() => ({
-    search: deferredSearch.trim(),
-    sort,
-    limit: 500,
-    dashboard_only: dashboardOnly,
-    killable_only: killableOnly
-  }), [dashboardOnly, deferredSearch, killableOnly, sort]);
+  const matchesLocalFilters = useMemo(() => {
+    const normalizedSearch = deferredSearch.trim().toLowerCase();
 
-  const processQuery = useQuery({
-    queryKey: dashboardQueryKeys.processesList(queryOptions),
-    queryFn: () => fetchProcesses(queryOptions),
-    placeholderData: processes ?? [],
-    staleTime: 5000
-  });
+    return (process) => {
+      if (!matchesSearch(process, normalizedSearch)) {
+        return false;
+      }
 
-  const allProcesses = useMemo(
-    () => processQuery.data ?? processes ?? [],
-    [processQuery.data, processes]
-  );
-  const matchesLocalFilters = useMemo(() => (process) => {
+      if (dashboardOnly && !process.dashboard_owned) {
+        return false;
+      }
+
+      if (killableOnly && !process.killable) {
+        return false;
+      }
+
       if (statusFilter !== 'all' && process.status !== statusFilter) {
         return false;
       }
 
       return true;
-    }, [statusFilter]);
+    };
+  }, [dashboardOnly, deferredSearch, killableOnly, statusFilter]);
 
   const matchingProcesses = useMemo(() => (
     allProcesses.filter(matchesLocalFilters)
@@ -233,31 +250,25 @@ const ProcessManager = ({
 
     try {
       await killProcessMutation.mutateAsync(pendingProcess.pid);
-      onAction?.({
-        action: 'kill_process',
-        status: 'success',
-        message: `Stop requested for ${pendingProcess.name} (${pendingProcess.pid}).`,
-        severity: 'success',
-        entity_type: 'process',
-        entity_id: pendingProcess.pid
-      });
-      await Promise.allSettled([processQuery.refetch(), onRefresh?.()]);
+      await onRefresh?.();
     } catch (error) {
-      onAction?.({
-        action: 'kill_process',
-        status: 'failed',
-        message: error.message,
-        severity: 'danger',
-        entity_type: 'process',
-        entity_id: pendingProcess.pid,
-        retry_after: error.retryAfter ?? null
-      });
+      if (error?.status == null) {
+        onAction?.({
+          action: 'kill_process',
+          status: 'failed',
+          message: error.message,
+          severity: 'danger',
+          entity_type: 'process',
+          entity_id: pendingProcess.pid,
+          retry_after: error.retryAfter ?? null
+        });
+      }
     } finally {
       setPendingProcess(null);
     }
   };
 
-  const tableLoading = (loading || processQuery.isLoading) && !flatRows.length;
+  const tableLoading = loading && !flatRows.length;
 
   return (
     <section className="panel">
@@ -280,9 +291,9 @@ const ProcessManager = ({
             className="ghost-button"
             type="button"
             onClick={() => {
-              void Promise.allSettled([processQuery.refetch(), onRefresh?.()]);
+              void onRefresh?.();
             }}
-            disabled={processQuery.isFetching}
+            disabled={isRefreshing}
           >
             <RefreshCw size={16} />
             Refresh
@@ -363,7 +374,7 @@ const ProcessManager = ({
         </div>
 
         <div className="toolbar-meta muted-note">
-          {matchingProcesses.length} matching processes • {flatRows.length} rows visible • last refresh {formatUpdatedAt(processQuery.dataUpdatedAt)}
+          {matchingProcesses.length} matching processes | {flatRows.length} rows visible | last refresh {formatUpdatedAt(lastUpdatedAt)}
         </div>
 
         {!isAdmin ? (
@@ -415,65 +426,66 @@ const ProcessManager = ({
                       : null;
 
                     return (
-                    <tr key={process.pid}>
-                      <td>
-                        <div className="process-cell-stack">
-                          <div className="process-tree-row" style={{ paddingLeft: `${node.level * 18}px` }}>
-                            {node.children.length ? (
-                              <button
-                                className="process-tree-toggle"
-                                type="button"
-                                onClick={() => toggleProcessGroup(process.pid)}
-                                aria-label={expanded ? `Collapse ${process.name}` : `Expand ${process.name}`}
-                              >
-                                {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                              </button>
-                            ) : (
-                              <span className="process-tree-spacer" aria-hidden="true" />
-                            )}
-                            <div className="process-cell-stack">
-                              <strong>{processLabel}</strong>
-                              <div className="process-chip-row">
-                                <span className={`status-pill ${process.inventory_degraded ? 'warn' : 'neutral'}`}>
-                                  {formatInventoryLabel(process)}
-                                </span>
-                                {process.username ? <span className="status-pill neutral">{process.username}</span> : null}
+                      <tr key={process.pid}>
+                        <td>
+                          <div className="process-cell-stack">
+                            <div className="process-tree-row" style={{ paddingLeft: `${node.level * 18}px` }}>
+                              {node.children.length ? (
+                                <button
+                                  className="process-tree-toggle"
+                                  type="button"
+                                  onClick={() => toggleProcessGroup(process.pid)}
+                                  aria-label={expanded ? `Collapse ${process.name}` : `Expand ${process.name}`}
+                                >
+                                  {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                </button>
+                              ) : (
+                                <span className="process-tree-spacer" aria-hidden="true" />
+                              )}
+                              <div className="process-cell-stack">
+                                <strong>{processLabel}</strong>
+                                <div className="process-chip-row">
+                                  <span className={`status-pill ${process.inventory_degraded ? 'warn' : 'neutral'}`}>
+                                    {formatInventoryLabel(process)}
+                                  </span>
+                                  {process.username ? <span className="status-pill neutral">{process.username}</span> : null}
+                                </div>
+                                {expanded && groupTotals ? (
+                                  <span className="muted-note wrap-text">{groupTotals}</span>
+                                ) : null}
+                                <span className="muted-note wrap-text">{secondaryLine}</span>
                               </div>
-                              {expanded && groupTotals ? (
-                                <span className="muted-note wrap-text">{groupTotals}</span>
-                              ) : null}
-                              <span className="muted-note wrap-text">{secondaryLine}</span>
                             </div>
                           </div>
-                        </div>
-                      </td>
-                      <td>{process.pid}</td>
-                      <td className={displayedCpuPercent > 80 ? 'value-danger' : displayedCpuPercent > 50 ? 'value-warn' : 'value-good'}>
-                        {formatCpuPercent(displayedCpuPercent)}
-                      </td>
-                      <td>{formatMemory(displayedMemoryMb)}</td>
-                      <td><span className="status-pill neutral">{process.status}</span></td>
-                      <td>
-                        <span className={`status-pill ${process.dashboard_owned ? 'good' : 'warn'}`}>
-                          {process.dashboard_owned ? 'Managed' : 'External'}
-                        </span>
-                      </td>
-                      <td>
-                        <div className="table-action">
-                          <button
-                            className="danger-button"
-                            type="button"
-                            onClick={() => requestKill(process)}
-                            disabled={!process.killable || killProcessMutation.isPending}
-                            title={process.kill_reason || `Stop process ${process.pid}`}
-                          >
-                            <Trash2 size={16} />
-                            Stop
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );})}
+                        </td>
+                        <td>{process.pid}</td>
+                        <td className={displayedCpuPercent > 80 ? 'value-danger' : displayedCpuPercent > 50 ? 'value-warn' : 'value-good'}>
+                          {formatCpuPercent(displayedCpuPercent)}
+                        </td>
+                        <td>{formatMemory(displayedMemoryMb)}</td>
+                        <td><span className="status-pill neutral">{process.status}</span></td>
+                        <td>
+                          <span className={`status-pill ${process.dashboard_owned ? 'good' : 'warn'}`}>
+                            {process.dashboard_owned ? 'Managed' : 'External'}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="table-action">
+                            <button
+                              className="danger-button"
+                              type="button"
+                              onClick={() => requestKill(process)}
+                              disabled={!process.killable || killProcessMutation.isPending}
+                              title={process.kill_reason || `Stop process ${process.pid}`}
+                            >
+                              <Trash2 size={16} />
+                              Stop
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -487,61 +499,63 @@ const ProcessManager = ({
                 const groupTotals = node.children.length
                   ? `Group total ${formatCpuPercent(node.aggregateCpuPercent)} CPU | ${formatMemory(node.aggregateMemoryMb)}`
                   : null;
+
                 return (
-                <div
-                  key={`mobile-${process.pid}`}
-                  className="mini-card explorer-card"
-                  style={{ marginLeft: `${node.level * 12}px` }}
-                >
-                  <div className="explorer-card-top">
-                    <div className="process-mobile-heading">
-                      <div className="process-tree-row">
-                        {node.children.length ? (
-                          <button
-                            className="process-tree-toggle"
-                            type="button"
-                            onClick={() => toggleProcessGroup(process.pid)}
-                            aria-label={expanded ? `Collapse ${process.name}` : `Expand ${process.name}`}
-                          >
-                            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                          </button>
-                        ) : (
-                          <span className="process-tree-spacer" aria-hidden="true" />
-                        )}
-                        <div>
-                          <div className="action-feed-title">{buildProcessLabel(node)}</div>
-                          <div className="muted-note">PID {process.pid}</div>
+                  <div
+                    key={`mobile-${process.pid}`}
+                    className="mini-card explorer-card"
+                    style={{ marginLeft: `${node.level * 12}px` }}
+                  >
+                    <div className="explorer-card-top">
+                      <div className="process-mobile-heading">
+                        <div className="process-tree-row">
+                          {node.children.length ? (
+                            <button
+                              className="process-tree-toggle"
+                              type="button"
+                              onClick={() => toggleProcessGroup(process.pid)}
+                              aria-label={expanded ? `Collapse ${process.name}` : `Expand ${process.name}`}
+                            >
+                              {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                            </button>
+                          ) : (
+                            <span className="process-tree-spacer" aria-hidden="true" />
+                          )}
+                          <div>
+                            <div className="action-feed-title">{buildProcessLabel(node)}</div>
+                            <div className="muted-note">PID {process.pid}</div>
+                          </div>
                         </div>
                       </div>
+                      <span className={`status-badge ${process.killable ? 'status-success' : 'status-warning'}`}>
+                        {process.killable ? 'Killable' : 'Blocked'}
+                      </span>
                     </div>
-                    <span className={`status-badge ${process.killable ? 'status-success' : 'status-warning'}`}>
-                      {process.killable ? 'Killable' : 'Blocked'}
-                    </span>
+                    <div className="explorer-metrics">
+                      <span>CPU {formatCpuPercent(displayedCpuPercent)}</span>
+                      <span>{formatMemory(displayedMemoryMb)}</span>
+                      <span>{process.status}</span>
+                    </div>
+                    <div className="process-chip-row">
+                      <span className={`status-pill ${process.inventory_degraded ? 'warn' : 'neutral'}`}>
+                        {formatInventoryLabel(process)}
+                      </span>
+                      {process.username ? <span className="status-pill neutral">{process.username}</span> : null}
+                    </div>
+                    {expanded && groupTotals ? <div className="muted-note wrap-text">{groupTotals}</div> : null}
+                    <div className="muted-note wrap-text">{process.command_line || process.exe_path || process.kill_reason || 'Dashboard-owned process.'}</div>
+                    <button
+                      className="danger-button"
+                      type="button"
+                      onClick={() => requestKill(process)}
+                      disabled={!process.killable || killProcessMutation.isPending}
+                    >
+                      <Trash2 size={16} />
+                      Stop
+                    </button>
                   </div>
-                  <div className="explorer-metrics">
-                    <span>CPU {formatCpuPercent(displayedCpuPercent)}</span>
-                    <span>{formatMemory(displayedMemoryMb)}</span>
-                    <span>{process.status}</span>
-                  </div>
-                  <div className="process-chip-row">
-                    <span className={`status-pill ${process.inventory_degraded ? 'warn' : 'neutral'}`}>
-                      {formatInventoryLabel(process)}
-                    </span>
-                    {process.username ? <span className="status-pill neutral">{process.username}</span> : null}
-                  </div>
-                  {expanded && groupTotals ? <div className="muted-note wrap-text">{groupTotals}</div> : null}
-                  <div className="muted-note wrap-text">{process.command_line || process.exe_path || process.kill_reason || 'Dashboard-owned process.'}</div>
-                  <button
-                    className="danger-button"
-                    type="button"
-                    onClick={() => requestKill(process)}
-                    disabled={!process.killable || killProcessMutation.isPending}
-                  >
-                    <Trash2 size={16} />
-                    Stop
-                  </button>
-                </div>
-              );})}
+                );
+              })}
             </div>
           </>
         )}

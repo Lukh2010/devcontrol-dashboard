@@ -9,6 +9,7 @@ import {
   performanceSnapshotSchema,
   portsSchema,
   processesSchema,
+  systemAdminSchema,
   systemInfoSchema
 } from './schemas';
 
@@ -69,12 +70,11 @@ export const dashboardQueryKeys = {
   authStatus: ['auth-status'],
   validatePassword: (password) => ['auth-validate', password],
   authSession: ['auth-session'],
+  systemAdmin: ['system-admin'],
   systemInfo: ['system-info'],
   systemPerformance: ['system-performance'],
   processes: ['processes'],
-  processesList: (filters = {}) => ['processes', filters],
   ports: ['ports'],
-  portsList: (filters = {}) => ['ports', filters],
   networkInfo: ['network-info']
 };
 
@@ -118,6 +118,10 @@ export function fetchSystemPerformance() {
   return getJson('/api/system/performance', performanceSnapshotSchema);
 }
 
+export function fetchSystemAdmin() {
+  return getJson('/api/system/is-admin', systemAdminSchema);
+}
+
 export function fetchProcesses(options = {}) {
   return getJson(`/api/processes${buildSearchParams(options)}`, processesSchema);
 }
@@ -128,6 +132,48 @@ export function fetchPorts(options = {}) {
 
 export function fetchNetworkInfo() {
   return getJson('/api/network/info', networkInfoSchema);
+}
+
+export function systemInfoQueryOptions() {
+  return {
+    queryKey: dashboardQueryKeys.systemInfo,
+    queryFn: fetchSystemInfo
+  };
+}
+
+export function systemPerformanceQueryOptions() {
+  return {
+    queryKey: dashboardQueryKeys.systemPerformance,
+    queryFn: fetchSystemPerformance
+  };
+}
+
+export function systemAdminQueryOptions() {
+  return {
+    queryKey: dashboardQueryKeys.systemAdmin,
+    queryFn: fetchSystemAdmin
+  };
+}
+
+export function processesQueryOptions() {
+  return {
+    queryKey: dashboardQueryKeys.processes,
+    queryFn: () => fetchProcesses({ limit: 500 })
+  };
+}
+
+export function portsQueryOptions() {
+  return {
+    queryKey: dashboardQueryKeys.ports,
+    queryFn: () => fetchPorts({ limit: 500 })
+  };
+}
+
+export function networkInfoQueryOptions() {
+  return {
+    queryKey: dashboardQueryKeys.networkInfo,
+    queryFn: fetchNetworkInfo
+  };
 }
 
 export function killPort({ port, controlPassword }) {

@@ -1,8 +1,6 @@
 import React, { useDeferredValue, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Network, RefreshCw, Search, ShieldAlert, Trash2 } from 'lucide-react';
 
-import { dashboardQueryKeys, fetchPorts } from '../features/dashboard/api/client';
 import { useKillPortMutation } from '../features/dashboard/hooks/useActionMutations';
 import ConfirmDialog from './ConfirmDialog';
 
@@ -34,9 +32,45 @@ function formatPortSourceLabel(portInfo) {
   return 'Unknown';
 }
 
+function matchesSearch(portInfo, value) {
+  if (!value) {
+    return true;
+  }
+
+  const haystack = [
+    portInfo.port,
+    portInfo.pid,
+    portInfo.process_name,
+    portInfo.local_address,
+    portInfo.exe_path,
+    portInfo.protocol,
+    portInfo.state,
+    portInfo.status
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return haystack.includes(value);
+}
+
+function comparePorts(left, right, sort) {
+  if (sort === 'process_asc') {
+    return String(left.process_name || '').localeCompare(String(right.process_name || ''));
+  }
+
+  if (sort === 'pid_asc') {
+    return Number(left.pid || 0) - Number(right.pid || 0);
+  }
+
+  return Number(left.port || 0) - Number(right.port || 0);
+}
+
 const PortControl = ({
   ports,
   loading,
+  isRefreshing = false,
+  lastUpdatedAt = null,
   authUnlocked,
   passwordProtectionEnabled,
   onRefresh,
@@ -51,22 +85,27 @@ const PortControl = ({
   const deferredSearch = useDeferredValue(search);
   const killPortMutation = useKillPortMutation('');
 
-  const queryOptions = useMemo(() => ({
-    search: deferredSearch.trim(),
-    sort,
-    limit: 500,
-    dashboard_only: dashboardOnly,
-    killable_only: killableOnly
-  }), [dashboardOnly, deferredSearch, killableOnly, sort]);
+  const visiblePorts = useMemo(() => {
+    const normalizedSearch = deferredSearch.trim().toLowerCase();
 
-  const portsQuery = useQuery({
-    queryKey: dashboardQueryKeys.portsList(queryOptions),
-    queryFn: () => fetchPorts(queryOptions),
-    placeholderData: ports ?? [],
-    staleTime: 5000
-  });
+    return [...(ports ?? [])]
+      .filter((portInfo) => {
+        if (!matchesSearch(portInfo, normalizedSearch)) {
+          return false;
+        }
 
-  const visiblePorts = portsQuery.data ?? ports ?? [];
+        if (dashboardOnly && !portInfo.dashboard_owned) {
+          return false;
+        }
+
+        if (killableOnly && !portInfo.killable) {
+          return false;
+        }
+
+        return true;
+      })
+      .sort((left, right) => comparePorts(left, right, sort));
+  }, [dashboardOnly, deferredSearch, killableOnly, ports, sort]);
 
   const requestKill = (portInfo) => {
     if (passwordProtectionEnabled && !authUnlocked) {
@@ -91,32 +130,26 @@ const PortControl = ({
     }
 
     try {
-      const result = await killPortMutation.mutateAsync(pendingPort.port);
-      onAction?.({
-        action: 'kill_by_port',
-        status: 'success',
-        message: result.message,
-        severity: 'success',
-        entity_type: 'port',
-        entity_id: pendingPort.port
-      });
-      await Promise.allSettled([portsQuery.refetch(), onRefresh?.()]);
+      await killPortMutation.mutateAsync(pendingPort.port);
+      await onRefresh?.();
     } catch (error) {
-      onAction?.({
-        action: 'kill_by_port',
-        status: 'failed',
-        message: error.message,
-        severity: 'danger',
-        entity_type: 'port',
-        entity_id: pendingPort.port,
-        retry_after: error.retryAfter ?? null
-      });
+      if (error?.status == null) {
+        onAction?.({
+          action: 'kill_by_port',
+          status: 'failed',
+          message: error.message,
+          severity: 'danger',
+          entity_type: 'port',
+          entity_id: pendingPort.port,
+          retry_after: error.retryAfter ?? null
+        });
+      }
     } finally {
       setPendingPort(null);
     }
   };
 
-  const tableLoading = (loading || portsQuery.isLoading) && !visiblePorts.length;
+  const tableLoading = loading && !visiblePorts.length;
 
   return (
     <section className="panel">
@@ -135,9 +168,9 @@ const PortControl = ({
           className="ghost-button"
           type="button"
           onClick={() => {
-            void Promise.allSettled([portsQuery.refetch(), onRefresh?.()]);
+            void onRefresh?.();
           }}
-          disabled={portsQuery.isFetching}
+          disabled={isRefreshing}
         >
           <RefreshCw size={16} />
           Refresh
@@ -178,7 +211,7 @@ const PortControl = ({
         </div>
 
         <div className="toolbar-meta muted-note">
-          {visiblePorts.length} results • last refresh {formatUpdatedAt(portsQuery.dataUpdatedAt)}
+          {visiblePorts.length} results | last refresh {formatUpdatedAt(lastUpdatedAt)}
         </div>
 
         {tableLoading ? (
@@ -262,7 +295,7 @@ const PortControl = ({
                   <div className="explorer-card-top">
                     <div>
                       <div className="action-feed-title">Port {portInfo.port}</div>
-                      <div className="muted-note">{portInfo.process_name} • PID {portInfo.pid}</div>
+                      <div className="muted-note">{portInfo.process_name} | PID {portInfo.pid}</div>
                     </div>
                     <span className={`status-badge ${portInfo.killable ? 'status-success' : 'status-warning'}`}>
                       {portInfo.killable ? 'Killable' : 'Blocked'}
@@ -300,7 +333,7 @@ const PortControl = ({
         title={pendingPort ? `Stop port ${pendingPort.port}?` : 'Stop port'}
         description="Only listeners owned by DevControl-managed processes can be terminated."
         details={pendingPort ? [
-          `${pendingPort.process_name} • PID ${pendingPort.pid}`,
+          `${pendingPort.process_name} | PID ${pendingPort.pid}`,
           pendingPort.kill_reason || 'This listener is eligible for termination.'
         ] : null}
         confirmLabel={killPortMutation.isPending ? 'Stopping...' : 'Stop listener'}

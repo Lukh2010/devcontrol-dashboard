@@ -288,17 +288,18 @@ class DevControlStarter:
         print("Terminating registered dashboard processes...")
 
         for group_name, pid_list in dashboard_pids.items():
-            for pid_str in pid_list:
+            for pid_entry in pid_list:
                 try:
-                    pid = int(pid_str)
+                    pid_value = pid_entry.get("pid") if isinstance(pid_entry, dict) else pid_entry
+                    pid = int(pid_value)
                     if not is_dashboard_pid(pid):
                         print(f"Skipping unregistered PID {pid}")
                         continue
                     self._terminate_pid(pid, group_name)
                 except ProcessLookupError:
-                    print(f"PID {pid_str} already terminated")
+                    print(f"PID {pid_value} already terminated")
                 except Exception as exc:
-                    print(f"Error killing PID {pid_str}: {exc}")
+                    print(f"Error killing PID {pid_value}: {exc}")
 
         try:
             if PID_FILE.exists():

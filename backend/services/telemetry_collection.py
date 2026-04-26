@@ -1,0 +1,564 @@
+"""Telemetry collection, enrichment, and formatting helpers."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import os
+import platform
+import socket
+import subprocess
+import time
+
+import psutil
+
+from dashboard_pids import is_dashboard_pid
+
+
+class TelemetryCollectionMixin:
+    """Collects and formats system, process, port, and network telemetry."""
+
+    def collect_system_info(self):
+        """Collect static host metadata for the dashboard."""
+        return {
+            "platform": platform.system(),
+            "platform_release": platform.release(),
+            "platform_version": platform.version(),
+            "architecture": platform.machine(),
+            "hostname": socket.gethostname(),
+            "processor": platform.processor(),
+            "cpu_count": psutil.cpu_count(),
+            "memory_total": psutil.virtual_memory().total,
+            "memory_available": psutil.virtual_memory().available
+        }
+
+    def collect_system_performance(self, interval=1):
+        """Collect current CPU, memory, and disk performance metrics."""
+        cpu_percent = psutil.cpu_percent(interval=interval)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage("/")
+        return {
+            "cpu_percent": cpu_percent,
+            "cpu_count": psutil.cpu_count(),
+            "memory": {
+                "total": memory.total,
+                "available": memory.available,
+                "percent": memory.percent,
+                "used": memory.used,
+                "free": memory.free
+            },
+            "disk": {
+                "total": disk.total,
+                "used": disk.used,
+                "free": disk.free,
+                "percent": (disk.used / disk.total) * 100
+            },
+            "timestamp": time.time()
+        }
+
+    def _build_process_entry(self, process_info: dict, is_admin: bool) -> dict:
+        pid = process_info["pid"]
+        dashboard_owned = bool(pid) and is_dashboard_pid(pid)
+        killable = dashboard_owned and (platform.system() != "Windows" or is_admin)
+        kill_reason = None
+
+        if not dashboard_owned:
+            kill_reason = "Not managed by DevControl"
+        elif platform.system() == "Windows" and not is_admin:
+            kill_reason = "Administrator privileges required on Windows"
+
+        return {
+            **process_info,
+            "dashboard_owned": dashboard_owned,
+            "killable": killable,
+            "kill_reason": kill_reason,
+        }
+
+    def _build_port_entry(self, port_info: dict, is_admin: bool) -> dict:
+        pid = port_info["pid"]
+        dashboard_owned = bool(pid) and is_dashboard_pid(pid)
+        killable = dashboard_owned and (platform.system() != "Windows" or is_admin)
+        kill_reason = None
+
+        if not dashboard_owned:
+            kill_reason = "Not managed by DevControl"
+        elif platform.system() == "Windows" and not is_admin:
+            kill_reason = "Administrator privileges required on Windows"
+
+        return {
+            **port_info,
+            "dashboard_owned": dashboard_owned,
+            "killable": killable,
+            "kill_reason": kill_reason,
+        }
+
+    def _sort_processes(self, processes: list[dict], sort: str) -> list[dict]:
+        normalized_sort = (sort or "cpu_desc").lower()
+        if normalized_sort == "memory_desc":
+            return sorted(processes, key=lambda process: (-process["memory_mb"], -process["cpu_percent"], process["pid"]))
+        if normalized_sort == "name_asc":
+            return sorted(processes, key=lambda process: (process["name"].lower(), process["pid"]))
+        if normalized_sort == "pid_asc":
+            return sorted(processes, key=lambda process: process["pid"])
+        if normalized_sort == "status_asc":
+            return sorted(processes, key=lambda process: (process["status"], process["name"].lower(), process["pid"]))
+        return sorted(processes, key=lambda process: (-process["cpu_percent"], -process["memory_mb"], process["pid"]))
+
+    def _sort_ports(self, ports: list[dict], sort: str) -> list[dict]:
+        normalized_sort = (sort or "port_asc").lower()
+        if normalized_sort == "process_asc":
+            return sorted(ports, key=lambda port: (port["process_name"].lower(), port["port"], port["pid"]))
+        if normalized_sort == "pid_asc":
+            return sorted(ports, key=lambda port: (port["pid"], port["port"]))
+        return sorted(ports, key=lambda port: (port["port"], port["pid"]))
+
+    def _update_cpu_cache(self):
+        current_time = time.time()
+        if current_time - self._last_cpu_update < 1.0:
+            return
+
+        try:
+            cpu_count = max(psutil.cpu_count() or 1, 1)
+            new_cache = {}
+            new_cpu_times = {}
+            previous_snapshot_exists = bool(self._process_cpu_times) and self._last_cpu_update > 0
+            elapsed = current_time - self._last_cpu_update if previous_snapshot_exists else 0.0
+
+            for proc in psutil.process_iter(["pid"]):
+                try:
+                    cpu_times = proc.cpu_times()
+                    total_cpu_time = float(cpu_times.user + cpu_times.system)
+                    new_cpu_times[proc.pid] = total_cpu_time
+
+                    previous_cpu_time = self._process_cpu_times.get(proc.pid)
+                    if previous_cpu_time is None or elapsed <= 0:
+                        new_cache[proc.pid] = 0.0
+                        continue
+
+                    cpu_delta = max(total_cpu_time - previous_cpu_time, 0.0)
+                    normalized_cpu = min(max((cpu_delta / elapsed) / cpu_count * 100, 0.0), 100.0)
+                    new_cache[proc.pid] = normalized_cpu
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+
+            self._cpu_cache = new_cache
+            self._process_cpu_times = new_cpu_times
+            self._last_cpu_update = current_time
+            self._cpu_cache_ready = previous_snapshot_exists and elapsed > 0
+        except Exception as exc:
+            print(f"Error updating CPU cache: {exc}")
+
+    def _update_inventory_cpu_cache(self, records: list[dict]) -> dict[int, float]:
+        current_time = time.time()
+        if current_time - self._last_cpu_update < 1.0:
+            return dict(self._cpu_cache)
+
+        cpu_count = max(psutil.cpu_count() or 1, 1)
+        previous_snapshot_exists = bool(self._process_cpu_times) and self._last_cpu_update > 0
+        elapsed = current_time - self._last_cpu_update if previous_snapshot_exists else 0.0
+        new_cache: dict[int, float] = {}
+        new_cpu_times: dict[int, float] = {}
+
+        for record in records:
+            pid = int(record.get("pid") or 0)
+            if not pid:
+                continue
+
+            total_cpu_time = float(record.get("cpu_time_total") or 0.0)
+            new_cpu_times[pid] = total_cpu_time
+
+            previous_cpu_time = self._process_cpu_times.get(pid)
+            if previous_cpu_time is None or elapsed <= 0:
+                new_cache[pid] = round(float(record.get("cpu_percent") or 0.0), 4)
+                continue
+
+            cpu_delta = max(total_cpu_time - previous_cpu_time, 0.0)
+            normalized_cpu = min(max((cpu_delta / elapsed) / cpu_count * 100, 0.0), 100.0)
+            new_cache[pid] = round(normalized_cpu, 4)
+
+        self._cpu_cache = new_cache
+        self._process_cpu_times = new_cpu_times
+        self._last_cpu_update = current_time
+        self._cpu_cache_ready = previous_snapshot_exists and elapsed > 0
+        return dict(new_cache)
+
+    def _update_windows_live_cpu_cache(self, pids: list[int]) -> dict[int, float]:
+        """Sample per-process CPU via psutil for Windows inventory-backed snapshots."""
+        current_time = time.time()
+        if current_time - self._windows_live_cpu_last_update < 1.0:
+            return dict(self._windows_live_cpu_cache)
+
+        cpu_count = max(psutil.cpu_count() or 1, 1)
+        requested_pids = {int(pid) for pid in pids if int(pid or 0) > 0}
+        next_procs = {}
+        next_cache: dict[int, float] = {}
+
+        for pid in requested_pids:
+            try:
+                process = self._windows_live_cpu_procs.get(pid) or psutil.Process(pid)
+                raw_cpu_percent = float(process.cpu_percent(interval=None) or 0.0)
+                normalized_cpu = min(max(raw_cpu_percent / cpu_count, 0.0), 100.0)
+                next_cache[pid] = round(normalized_cpu, 4)
+                next_procs[pid] = process
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+                continue
+
+        self._windows_live_cpu_cache = next_cache
+        self._windows_live_cpu_procs = next_procs
+        self._windows_live_cpu_last_update = current_time
+        return dict(next_cache)
+
+    def collect_processes(
+        self,
+        search: str = "",
+        sort: str = "cpu_desc",
+        limit: int | None = 15,
+        dashboard_only: bool = False,
+        killable_only: bool = False,
+    ):
+        """Collect enriched process entries from inventory or psutil fallback."""
+        try:
+            return self._collect_processes_with_inventory(
+                search=search,
+                sort=sort,
+                limit=limit,
+                dashboard_only=dashboard_only,
+                killable_only=killable_only,
+            )
+        except Exception as exc:
+            print(f"Inventory-backed process collection failed, falling back to psutil: {exc}")
+            return self._collect_processes_with_psutil(
+                search=search,
+                sort=sort,
+                limit=limit,
+                dashboard_only=dashboard_only,
+                killable_only=killable_only,
+            )
+
+    def _collect_processes_with_inventory(
+        self,
+        search: str = "",
+        sort: str = "cpu_desc",
+        limit: int | None = 15,
+        dashboard_only: bool = False,
+        killable_only: bool = False,
+    ):
+        is_admin = self.collect_is_admin()
+        normalized_search = (search or "").strip().lower()
+        processes = []
+        records = self.inventory_service.collect_processes()
+        cpu_cache = self._update_inventory_cpu_cache(records)
+        windows_live_cpu_cache = {}
+        if platform.system() == "Windows":
+            windows_live_cpu_cache = self._update_windows_live_cpu_cache([
+                int(record.get("pid") or 0) for record in records
+            ])
+
+        for record in records:
+            pid = int(record.get("pid") or 0)
+            computed_cpu_percent = max(
+                cpu_cache.get(pid, 0.0),
+                windows_live_cpu_cache.get(pid, 0.0),
+                float(record.get("cpu_percent") or 0.0),
+            )
+            process_name = str(record.get("name") or "Unknown").strip() or "Unknown"
+            if process_name == "System Idle Process":
+                continue
+
+            process_entry = self._build_process_entry({
+                "pid": pid,
+                "name": process_name,
+                "cpu_percent": round(computed_cpu_percent, 4),
+                "memory_mb": round(float(record.get("memory_mb") or 0.0), 2),
+                "status": str(record.get("status") or "unknown"),
+                "parent_pid": int(record.get("parent_pid") or 0),
+                "username": record.get("username"),
+                "exe_path": record.get("exe_path"),
+                "command_line": record.get("command_line"),
+                "started_at": record.get("started_at"),
+                "cpu_time_total": round(float(record.get("cpu_time_total") or 0.0), 4),
+                "inventory_source": "command",
+                "inventory_degraded": False,
+            }, is_admin)
+
+            if dashboard_only and not process_entry["dashboard_owned"]:
+                continue
+            if killable_only and not process_entry["killable"]:
+                continue
+
+            searchable = " ".join([
+                process_entry["name"],
+                str(process_entry["pid"]),
+                str(process_entry.get("username") or ""),
+                str(process_entry.get("command_line") or ""),
+            ]).lower()
+            if normalized_search and normalized_search not in searchable:
+                continue
+
+            processes.append(process_entry)
+
+        sorted_processes = self._sort_processes(processes, sort)
+        if limit is None or limit <= 0:
+            return sorted_processes
+        return sorted_processes[:limit]
+
+    def _collect_processes_with_psutil(
+        self,
+        search: str = "",
+        sort: str = "cpu_desc",
+        limit: int | None = 15,
+        dashboard_only: bool = False,
+        killable_only: bool = False,
+    ):
+        self._update_cpu_cache()
+        is_admin = self.collect_is_admin()
+        normalized_search = (search or "").strip().lower()
+        processes = []
+        for proc in psutil.process_iter(["pid", "ppid", "name", "memory_info", "status", "username", "exe", "cmdline", "create_time"]):
+            try:
+                pinfo = proc.info
+                cpu_percent = self._cpu_cache.get(proc.pid, 0.0) if self._cpu_cache_ready else 0.0
+                memory_mb = pinfo["memory_info"].rss / 1024 / 1024 if pinfo["memory_info"] else 0
+                if pinfo["name"] and pinfo["name"] != "System Idle Process":
+                    process_entry = self._build_process_entry({
+                        "pid": pinfo["pid"],
+                        "parent_pid": pinfo.get("ppid") or 0,
+                        "name": pinfo["name"] or "Unknown",
+                        "cpu_percent": round(cpu_percent, 2),
+                        "memory_mb": round(memory_mb, 2),
+                        "status": pinfo["status"],
+                        "username": pinfo.get("username"),
+                        "exe_path": pinfo.get("exe"),
+                        "command_line": self._normalize_cmdline(pinfo.get("cmdline")),
+                        "started_at": self._format_started_at(pinfo.get("create_time")),
+                        "inventory_source": "psutil_fallback",
+                        "inventory_degraded": True,
+                    }, is_admin)
+
+                    if dashboard_only and not process_entry["dashboard_owned"]:
+                        continue
+                    if killable_only and not process_entry["killable"]:
+                        continue
+                    if normalized_search and normalized_search not in process_entry["name"].lower() and normalized_search not in str(process_entry["pid"]):
+                        continue
+
+                    processes.append(process_entry)
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+        sorted_processes = self._sort_processes(processes, sort)
+        if limit is None or limit <= 0:
+            return sorted_processes
+        return sorted_processes[:limit]
+
+    def collect_ports(
+        self,
+        search: str = "",
+        sort: str = "port_asc",
+        limit: int | None = 100,
+        dashboard_only: bool = False,
+        killable_only: bool = False,
+    ):
+        """Collect enriched listening-port entries from inventory or psutil fallback."""
+        try:
+            return self._collect_ports_with_inventory(
+                search=search,
+                sort=sort,
+                limit=limit,
+                dashboard_only=dashboard_only,
+                killable_only=killable_only,
+            )
+        except Exception as exc:
+            print(f"Inventory-backed port collection failed, falling back to psutil: {exc}")
+            return self._collect_ports_with_psutil(
+                search=search,
+                sort=sort,
+                limit=limit,
+                dashboard_only=dashboard_only,
+                killable_only=killable_only,
+            )
+
+    def _collect_ports_with_inventory(
+        self,
+        search: str = "",
+        sort: str = "port_asc",
+        limit: int | None = 100,
+        dashboard_only: bool = False,
+        killable_only: bool = False,
+    ):
+        normalized_search = (search or "").strip().lower()
+        is_admin = self.collect_is_admin()
+        connections = {}
+
+        for record in self.inventory_service.collect_ports():
+            port_entry = self._build_port_entry({
+                "port": int(record.get("port") or 0),
+                "process_name": str(record.get("process_name") or "Unknown").strip() or "Unknown",
+                "pid": int(record.get("pid") or 0),
+                "status": str(record.get("status") or "LISTEN"),
+                "protocol": record.get("protocol"),
+                "local_address": record.get("local_address"),
+                "remote_address": record.get("remote_address"),
+                "state": record.get("state"),
+                "exe_path": record.get("exe_path"),
+                "inventory_source": "command",
+                "inventory_degraded": False,
+            }, is_admin)
+
+            if dashboard_only and not port_entry["dashboard_owned"]:
+                continue
+            if killable_only and not port_entry["killable"]:
+                continue
+
+            searchable = " ".join([
+                str(port_entry["port"]),
+                port_entry["process_name"],
+                str(port_entry["pid"]),
+                str(port_entry.get("local_address") or ""),
+            ]).lower()
+            if normalized_search and normalized_search not in searchable:
+                continue
+
+            key = (port_entry["port"], port_entry["pid"], port_entry["process_name"])
+            connections[key] = port_entry
+
+        sorted_ports = self._sort_ports(list(connections.values()), sort)
+        if limit is None or limit <= 0:
+            return sorted_ports
+        return sorted_ports[:limit]
+
+    def _collect_ports_with_psutil(
+        self,
+        search: str = "",
+        sort: str = "port_asc",
+        limit: int | None = 100,
+        dashboard_only: bool = False,
+        killable_only: bool = False,
+    ):
+        connections = {}
+        normalized_search = (search or "").strip().lower()
+        is_admin = self.collect_is_admin()
+        for conn in psutil.net_connections():
+            if conn.status == "LISTEN":
+                try:
+                    process = psutil.Process(conn.pid) if conn.pid else None
+                    if process:
+                        key = (conn.laddr.port, conn.pid, process.name())
+                        port_entry = self._build_port_entry({
+                            "port": conn.laddr.port,
+                            "process_name": process.name(),
+                            "pid": conn.pid,
+                            "status": conn.status,
+                            "protocol": "tcp",
+                            "local_address": self._extract_address_host(conn.laddr),
+                            "remote_address": self._extract_address_host(conn.raddr),
+                            "state": conn.status,
+                            "exe_path": self._safe_process_exe(process),
+                            "inventory_source": "psutil_fallback",
+                            "inventory_degraded": True,
+                        }, is_admin)
+
+                        if dashboard_only and not port_entry["dashboard_owned"]:
+                            continue
+                        if killable_only and not port_entry["killable"]:
+                            continue
+                        searchable = f"{port_entry['port']} {port_entry['process_name']} {port_entry['pid']}".lower()
+                        if normalized_search and normalized_search not in searchable:
+                            continue
+
+                        connections[key] = port_entry
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        sorted_ports = self._sort_ports(list(connections.values()), sort)
+        if limit is None or limit <= 0:
+            return sorted_ports
+        return sorted_ports[:limit]
+
+    def collect_network_info(self):
+        """Collect network interfaces and a best-effort default gateway."""
+        network_info = {}
+        for interface, addrs in psutil.net_if_addrs().items():
+            network_info[interface] = []
+            for addr in addrs:
+                if addr.family == socket.AF_INET:
+                    network_info[interface].append({
+                        "family": "IPv4",
+                        "address": addr.address,
+                        "netmask": addr.netmask,
+                        "broadcast": addr.broadcast
+                    })
+                elif addr.family == socket.AF_INET6:
+                    network_info[interface].append({
+                        "family": "IPv6",
+                        "address": addr.address,
+                        "netmask": addr.netmask
+                    })
+
+        default_gateway = "Unknown"
+        if platform.system() == "Windows":
+            try:
+                result = subprocess.run("ipconfig", capture_output=True, text=True, check=False)
+                lines = result.stdout.split("\n")
+                for line in lines:
+                    if "Default Gateway" in line:
+                        gateway = line.split(":")[-1].strip()
+                        if gateway:
+                            default_gateway = gateway
+                            break
+            except Exception:
+                pass
+
+        return {
+            "interfaces": network_info,
+            "default_gateway": default_gateway,
+            "hostname": socket.gethostname()
+        }
+
+    def collect_is_admin(self):
+        """Return whether the current backend process has admin/root privileges."""
+        if platform.system() == "Windows":
+            try:
+                import ctypes
+                return ctypes.windll.shell32.IsUserAnAdmin() != 0
+            except Exception:
+                return False
+        return os.geteuid() == 0 if hasattr(os, "geteuid") else False
+
+    def _resolve_inventory_source(self, entries: list[dict]) -> str:
+        if not entries:
+            return "unknown"
+        return str(entries[0].get("inventory_source") or "unknown")
+
+    def _resolve_inventory_degraded(self, entries: list[dict]) -> bool:
+        return any(bool(entry.get("inventory_degraded")) for entry in entries)
+
+    def _normalize_cmdline(self, cmdline) -> str | None:
+        if isinstance(cmdline, str):
+            normalized = cmdline.strip()
+            return normalized or None
+        if isinstance(cmdline, (list, tuple)):
+            normalized = " ".join(str(part).strip() for part in cmdline if str(part).strip())
+            return normalized or None
+        return None
+
+    def _format_started_at(self, create_time) -> str | None:
+        try:
+            if not create_time:
+                return None
+            return datetime.fromtimestamp(float(create_time), tz=timezone.utc).isoformat()
+        except (TypeError, ValueError, OSError):
+            return None
+
+    def _extract_address_host(self, address) -> str | None:
+        if not address:
+            return None
+        if hasattr(address, "ip"):
+            return address.ip
+        if isinstance(address, tuple) and address:
+            return str(address[0])
+        return None
+
+    def _safe_process_exe(self, process) -> str | None:
+        try:
+            executable = process.exe()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+            return None
+        return executable or None

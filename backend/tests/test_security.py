@@ -31,9 +31,9 @@ class FakeActions:
         return {"success": True, "pid": pid, "is_admin": is_admin}, 200
 
 
-class FakeStreamProcessor:
-    def subscribe(self):
-        return 1, None
+class FakeLiveUpdateHub:
+    def subscribe(self, last_event_id=None):
+        return 1, None, []
 
     def unsubscribe(self, subscriber_id):
         return None
@@ -43,7 +43,7 @@ class FakeRuntime:
     def __init__(self):
         self.telemetry = FakeTelemetry()
         self.actions = FakeActions()
-        self.stream_processor = FakeStreamProcessor()
+        self.live_updates = FakeLiveUpdateHub()
 
     def start(self):
         return None

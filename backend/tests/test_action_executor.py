@@ -1,7 +1,11 @@
+import subprocess
+
+import pytest
+
 from app import create_app
-from event_bus import InMemoryEventBus
 from security import FAILED_AUTH_STATE, LOCKOUT_STATE, RATE_LIMIT_STATE, SESSION_TOKENS
 from services.action_executor import ActionExecutorService
+from services.live_update_hub import LiveUpdateHub
 
 
 class FakeTelemetry:
@@ -12,9 +16,9 @@ class FakeTelemetry:
         return {"platform": "TestOS"}
 
 
-class FakeStreamProcessor:
-    def subscribe(self):
-        return 1, None
+class FakeLiveUpdateHub:
+    def subscribe(self, last_event_id=None):
+        return 1, None, []
 
     def unsubscribe(self, subscriber_id):
         return None
@@ -23,8 +27,8 @@ class FakeStreamProcessor:
 class FakeRuntime:
     def __init__(self):
         self.telemetry = FakeTelemetry()
-        self.actions = ActionExecutorService(InMemoryEventBus())
-        self.stream_processor = FakeStreamProcessor()
+        self.actions = ActionExecutorService(LiveUpdateHub())
+        self.live_updates = FakeLiveUpdateHub()
 
     def start(self):
         return None
@@ -37,48 +41,52 @@ def clear_security_state():
     LOCKOUT_STATE.clear()
 
 
-def test_dangerous_commands_return_400(monkeypatch):
+def make_authenticated_client(monkeypatch):
     monkeypatch.setenv("DEVCONTROL_PASSWORD", "ci-password")
     clear_security_state()
     app = create_app(FakeRuntime())
     client = app.test_client()
+    headers = {"X-DevControl-Password": "ci-password"}
+    return client, headers
+
+
+def test_dangerous_commands_return_400(monkeypatch):
+    client, headers = make_authenticated_client(monkeypatch)
 
     response = client.post(
         "/api/commands/run",
         json={"command": "shutdown now"},
-        headers={"X-DevControl-Password": "ci-password"},
+        headers=headers,
     )
 
     assert response.status_code == 400
-    assert "Dangerous command" in response.get_json()["error"]
+    assert response.get_json()["classification"] == "dangerous"
+    assert "blocked" in response.get_json()["error"].lower()
 
 
 def test_unknown_commands_without_confirmation_return_400(monkeypatch):
-    monkeypatch.setenv("DEVCONTROL_PASSWORD", "ci-password")
-    clear_security_state()
-    app = create_app(FakeRuntime())
-    client = app.test_client()
+    client, headers = make_authenticated_client(monkeypatch)
 
     response = client.post(
         "/api/commands/run",
         json={"command": "foo_bar_baz_command"},
-        headers={"X-DevControl-Password": "ci-password"},
+        headers=headers,
     )
 
     assert response.status_code == 400
-    assert "confirmation" in response.get_json()["error"].lower()
+    payload = response.get_json()
+    assert payload["classification"] == "unknown"
+    assert payload["requires_confirmation"] is True
+    assert "confirmation" in payload["error"].lower()
 
 
 def test_echo_returns_200_with_stdout(monkeypatch):
-    monkeypatch.setenv("DEVCONTROL_PASSWORD", "ci-password")
-    clear_security_state()
-    app = create_app(FakeRuntime())
-    client = app.test_client()
+    client, headers = make_authenticated_client(monkeypatch)
 
     response = client.post(
         "/api/commands/run",
         json={"command": "echo hello"},
-        headers={"X-DevControl-Password": "ci-password"},
+        headers=headers,
     )
 
     assert response.status_code == 200
@@ -87,51 +95,68 @@ def test_echo_returns_200_with_stdout(monkeypatch):
     assert "hello" in payload["stdout"].lower()
 
 
-def test_echo_with_ampersand_stays_usable(monkeypatch):
-    monkeypatch.setenv("DEVCONTROL_PASSWORD", "ci-password")
-    clear_security_state()
-    app = create_app(FakeRuntime())
-    client = app.test_client()
+@pytest.mark.parametrize(
+    "command",
+    [
+        "dir & whoami",
+        "echo hello && whoami",
+        "git status || more",
+        "echo hello; whoami",
+        "type file.txt > out.txt",
+        "echo $(whoami)",
+    ],
+)
+def test_command_chaining_and_shell_operators_are_rejected(monkeypatch, command):
+    client, headers = make_authenticated_client(monkeypatch)
 
     response = client.post(
         "/api/commands/run",
-        json={"command": "echo hello & world"},
-        headers={"X-DevControl-Password": "ci-password"},
-    )
-
-    assert response.status_code == 200
-    payload = response.get_json()
-    assert payload["success"] is True
-    assert "hello" in payload["stdout"].lower()
-    assert "world" in payload["stdout"].lower()
-
-
-def test_shell_operators_are_rejected(monkeypatch):
-    monkeypatch.setenv("DEVCONTROL_PASSWORD", "ci-password")
-    clear_security_state()
-    app = create_app(FakeRuntime())
-    client = app.test_client()
-
-    response = client.post(
-        "/api/commands/run",
-        json={"command": "echo hello && whoami"},
-        headers={"X-DevControl-Password": "ci-password"},
+        json={"command": command},
+        headers=headers,
     )
 
     assert response.status_code == 400
-    assert "not allowed for security reasons" in response.get_json()["error"].lower()
+    payload = response.get_json()
+    assert payload["classification"] == "dangerous"
+    assert payload["reason"] == "shell_operator_blocked"
+    assert "not allowed for security reasons" in payload["error"].lower()
+
+
+def test_unknown_command_executes_when_explicitly_confirmed(monkeypatch):
+    client, headers = make_authenticated_client(monkeypatch)
+    observed = {}
+
+    def fake_run(args, **kwargs):
+        observed["args"] = args
+        observed["kwargs"] = kwargs
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr("services.action_executor_commands.subprocess.run", fake_run)
+
+    response = client.post(
+        "/api/commands/run?confirm=true",
+        json={"command": "custom-tool --flag"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["classification"] == "unknown"
+    assert payload["stdout"] == "ok\n"
+    assert observed["args"] == ["custom-tool", "--flag"]
+    assert observed["kwargs"]["stdin"] is subprocess.DEVNULL
+    assert observed["kwargs"]["capture_output"] is True
+    assert observed["kwargs"]["timeout"] == 30
 
 
 def test_parse_errors_return_400_without_shell_fallback(monkeypatch):
-    monkeypatch.setenv("DEVCONTROL_PASSWORD", "ci-password")
-    clear_security_state()
-    app = create_app(FakeRuntime())
-    client = app.test_client()
+    client, headers = make_authenticated_client(monkeypatch)
 
     response = client.post(
         "/api/commands/run",
         json={"command": 'echo "unterminated'},
-        headers={"X-DevControl-Password": "ci-password"},
+        headers=headers,
     )
 
     assert response.status_code == 400
@@ -189,7 +214,7 @@ class FakeInventoryService:
 
 
 def test_kill_process_by_port_uses_inventory_lookup(monkeypatch):
-    monkeypatch.setattr("services.action_executor.is_dashboard_pid", lambda pid: pid == 4321)
+    monkeypatch.setattr("services.action_executor_processes.is_dashboard_pid", lambda pid: pid == 4321)
 
     terminated = {"called": False}
 
@@ -200,10 +225,10 @@ def test_kill_process_by_port_uses_inventory_lookup(monkeypatch):
         def terminate(self):
             terminated["called"] = True
 
-    monkeypatch.setattr("services.action_executor.psutil.Process", lambda pid: FakeProcess())
+    monkeypatch.setattr("services.action_executor_processes.psutil.Process", lambda pid: FakeProcess())
 
     service = ActionExecutorService(
-        InMemoryEventBus(),
+        LiveUpdateHub(),
         inventory_service=FakeInventoryService(ports=[{"port": 8000, "pid": 4321, "process_name": "dashboard-api.exe"}]),
     )
 

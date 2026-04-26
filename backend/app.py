@@ -20,7 +20,7 @@ from security import (
     verify_control_password
 )
 from service_runtime import ServiceRuntime
-from services.stream_processor import to_sse
+from services.live_update_hub import to_sse
 
 
 def _parse_bool(value: str | None) -> bool:
@@ -40,6 +40,19 @@ def _parse_limit(value: str | None, default: int = 100) -> int | None:
         return None
 
     return min(parsed, 500)
+
+
+def _parse_last_event_id(value: str | None) -> int | None:
+    if value is None or value == "":
+        return None
+
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+
+    return parsed if parsed > 0 else None
+
 
 def create_app(runtime: ServiceRuntime | None = None) -> Flask:
     runtime = runtime or ServiceRuntime()
@@ -63,7 +76,7 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
                 "telemetry_collector": "Periodic system/process/network collectors",
                 "terminal_gateway": "WebSocket terminal service",
                 "action_executor": "Protected command/process/port actions",
-                "stream_processor": "Internal event bus consumer and SSE fanout"
+                "live_update_hub": "Internal live event publication and SSE fanout"
             },
             "endpoints": {
                 "/": "API Root - Returns API information",
@@ -182,31 +195,43 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
 
     @app.route("/api/events/stream")
     def stream_events():
-        subscriber_id, subscriber_queue = runtime.stream_processor.subscribe()
+        last_event_id = _parse_last_event_id(
+            request.headers.get("Last-Event-ID") or request.args.get("last_event_id")
+        )
+        subscription = runtime.live_updates.subscribe(last_event_id=last_event_id)
+        if len(subscription) == 3:
+            subscriber_id, subscriber_queue, replay_events = subscription
+        else:
+            subscriber_id, subscriber_queue = subscription
+            replay_events = []
 
         def generate():
             try:
-                bootstrap_collectors = [
-                    ("system_snapshot", runtime.telemetry.collect_system_snapshot),
-                    ("process_snapshot", runtime.telemetry.collect_process_snapshot),
-                    ("network_snapshot", runtime.telemetry.collect_network_snapshot),
-                ]
-                for event_type, collect_payload in bootstrap_collectors:
-                    try:
-                        payload = collect_payload()
-                        payload["timestamp"] = time.time()
-                        yield to_sse({"type": event_type, "payload": payload})
-                    except Exception as bootstrap_error:
-                        yield to_sse({
-                            "type": "action",
-                            "payload": {
-                                "action": "bootstrap_snapshot_error",
-                                "status": "failed",
-                                "snapshot_type": event_type,
-                                "reason": str(bootstrap_error),
-                                "timestamp": time.time()
-                            }
-                        })
+                if replay_events:
+                    for replay_event in replay_events:
+                        yield to_sse(replay_event)
+                else:
+                    bootstrap_collectors = [
+                        ("system_snapshot", runtime.telemetry.collect_system_snapshot),
+                        ("process_snapshot", runtime.telemetry.collect_process_snapshot),
+                        ("network_snapshot", runtime.telemetry.collect_network_snapshot),
+                    ]
+                    for event_type, collect_payload in bootstrap_collectors:
+                        try:
+                            payload = collect_payload()
+                            payload["timestamp"] = time.time()
+                            yield to_sse({"type": event_type, "payload": payload})
+                        except Exception as bootstrap_error:
+                            yield to_sse({
+                                "type": "action",
+                                "payload": {
+                                    "action": "bootstrap_snapshot_error",
+                                    "status": "failed",
+                                    "snapshot_type": event_type,
+                                    "reason": str(bootstrap_error),
+                                    "timestamp": time.time()
+                                }
+                            })
 
                 while True:
                     try:
@@ -215,10 +240,11 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
                     except queue.Empty:
                         yield "event: heartbeat\ndata: {}\n\n"
             finally:
-                runtime.stream_processor.unsubscribe(subscriber_id)
+                runtime.live_updates.unsubscribe(subscriber_id)
 
         response = Response(stream_with_context(generate()), mimetype="text/event-stream")
-        response.headers["Cache-Control"] = "no-cache"
+        response.headers["Cache-Control"] = "no-cache, no-transform"
+        response.headers["Connection"] = "keep-alive"
         response.headers["X-Accel-Buffering"] = "no"
         return response
 

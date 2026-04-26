@@ -1,20 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Activity,
-  ArrowUpRight,
-  Cpu,
-  HardDrive,
-  LockKeyhole,
-  Network,
-  RefreshCw,
-  Shield,
-  Terminal,
-  Wifi
-} from 'lucide-react';
+import { Activity, Cpu, Network, Terminal, Wifi } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
 import ActionFeed from './components/ActionFeed';
 import AttentionPanel from './components/AttentionPanel';
+import ControlAccessPanel from './components/ControlAccessPanel';
+import DashboardHero from './components/DashboardHero';
+import DashboardNavigation from './components/DashboardNavigation';
 import NetworkHub from './components/NetworkHub';
 import PortControl from './components/PortControl';
 import ProcessManager from './components/ProcessManager';
@@ -24,6 +16,7 @@ import ToastViewport from './components/ToastViewport';
 import WindowTerminal from './components/WindowTerminal';
 import { DashboardStreamProvider, useDashboardStream } from './features/dashboard/context/DashboardStreamContext';
 import { useAuthStatus, useCreateAuthSession, useDeleteAuthSession } from './features/dashboard/hooks/useAuthStatus';
+import { useDashboardLiveData } from './features/dashboard/hooks/useDashboardLiveData';
 
 const PANEL_STORAGE_KEY = 'devcontrol.activePanel';
 
@@ -43,14 +36,6 @@ const PANEL_TITLES = {
   network: { title: 'Network', subtitle: 'Interfaces, gateway and connectivity overview.' }
 };
 
-function formatClock(date) {
-  return date.toLocaleTimeString('de-DE', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  });
-}
-
 function formatLastSeen(value) {
   if (!value) {
     return 'Awaiting heartbeat';
@@ -61,14 +46,6 @@ function formatLastSeen(value) {
     minute: '2-digit',
     second: '2-digit'
   });
-}
-
-function formatBytesToGb(value) {
-  if (!value) {
-    return '...';
-  }
-
-  return `${Math.round(value / 1024 / 1024 / 1024)} GB`;
 }
 
 function getTerminalReadiness({ terminalState, terminalMessage, authUnlocked, passwordProtectionEnabled }) {
@@ -137,12 +114,6 @@ function AppContent() {
   const [passwordInput, setPasswordInput] = useState('');
 
   const {
-    systemInfo,
-    performanceData,
-    ports,
-    processes,
-    networkInfo,
-    isAdmin,
     terminalState,
     terminalMessage,
     streamStatus,
@@ -152,12 +123,29 @@ function AppContent() {
     lastHeartbeat,
     actionFeed,
     notice,
-    refreshProcesses,
-    refreshPorts,
-    refreshNetwork,
     recordUiAction,
     dismissNotice
   } = useDashboardStream();
+
+  const {
+    systemInfo,
+    performanceData,
+    isAdmin,
+    processes,
+    ports,
+    networkInfo,
+    processesLoading,
+    processesFetching,
+    processesUpdatedAt,
+    portsLoading,
+    portsFetching,
+    portsUpdatedAt,
+    networkLoading,
+    refreshSystem,
+    refreshProcesses,
+    refreshPorts,
+    refreshNetwork
+  } = useDashboardLiveData();
 
   const authStatusQuery = useAuthStatus();
   const createAuthSessionMutation = useCreateAuthSession();
@@ -290,39 +278,12 @@ function AppContent() {
     passwordProtectionEnabled
   }), [authUnlocked, passwordProtectionEnabled, terminalMessage, terminalState]);
 
-  const quickStats = [
-    {
-      label: 'Host',
-      value: systemInfo?.hostname || 'Loading',
-      hint: systemInfo?.platform || 'Waiting',
-      icon: Shield
-    },
-    {
-      label: 'Memory',
-      value: formatBytesToGb(systemInfo?.memory_total),
-      hint: performanceData ? `${Math.round(performanceData.memory.percent)}% used` : 'Waiting',
-      icon: HardDrive
-    },
-    {
-      label: 'Processes',
-      value: String(processes?.length || 0),
-      hint: processes?.[0] ? processes[0].name : 'No sample',
-      icon: Cpu
-    },
-    {
-      label: 'Ports',
-      value: String(ports?.length || 0),
-      hint: networkInfo?.default_gateway || 'No gateway',
-      icon: ArrowUpRight
-    }
-  ];
-
   const readinessItems = [
     {
       label: 'Backend',
       badgeTone: systemInfo ? 'status-success' : 'status-warning',
       badgeLabel: systemInfo ? 'Ready' : 'Waiting',
-      summary: systemInfo ? `API live on 127.0.0.1:8000` : 'Waiting for bootstrap snapshot',
+      summary: systemInfo ? 'API live on 127.0.0.1:8000' : 'Waiting for bootstrap snapshot',
       hint: streamError || 'Flask API and telemetry bootstrap.'
     },
     {
@@ -408,6 +369,7 @@ function AppContent() {
 
   const refreshAll = async () => {
     await Promise.allSettled([
+      refreshSystem(),
       refreshProcesses(),
       refreshPorts(),
       refreshNetwork(),
@@ -423,8 +385,15 @@ function AppContent() {
   };
 
   const heroAttention = attentionItems.slice(0, 3);
-
   const panelMeta = PANEL_TITLES[activePanel];
+
+  const currentStats = {
+    systemInfo,
+    performanceData,
+    processes,
+    ports,
+    networkInfo
+  };
 
   const renderContent = () => {
     if (activePanel === 'overview') {
@@ -467,7 +436,9 @@ function AppContent() {
             authUnlocked={authUnlocked}
             passwordProtectionEnabled={passwordProtectionEnabled}
             ports={ports}
-            loading={!ports?.length && streamStatus !== 'connected'}
+            loading={portsLoading && !ports.length}
+            isRefreshing={portsFetching}
+            lastUpdatedAt={portsUpdatedAt}
             onRefresh={refreshPorts}
             onAction={recordUiAction}
           />
@@ -489,8 +460,10 @@ function AppContent() {
             authUnlocked={authUnlocked}
             passwordProtectionEnabled={passwordProtectionEnabled}
             processes={processes}
-            loading={!processes?.length && streamStatus !== 'connected'}
+            loading={processesLoading && !processes.length}
             isAdmin={isAdmin}
+            isRefreshing={processesFetching}
+            lastUpdatedAt={processesUpdatedAt}
             onRefresh={refreshProcesses}
             onAction={recordUiAction}
           />
@@ -528,7 +501,7 @@ function AppContent() {
       >
         <NetworkHub
           networkInfo={networkInfo}
-          loading={!networkInfo && streamStatus !== 'connected'}
+          loading={networkLoading && !networkInfo}
         />
       </motion.div>
     );
@@ -542,151 +515,46 @@ function AppContent() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: 'easeOut' }}
       >
-        <section className="hero-panel panel">
-          <div className="hero-copy">
-            <span className="hero-kicker">DevControl dashboard</span>
-            <h1 className="hero-title">Local control surface with clear trust signals.</h1>
-            <div className="hero-badges">
-              <span className={`status-badge ${authBadge.tone}`}>{authBadge.label}</span>
-              <span className={`status-badge ${streamBadge.tone}`}>{streamBadge.label}</span>
-              <span className={`status-badge ${terminalBadge.tone}`}>{terminalBadge.label}</span>
-            </div>
-            <div className="hero-attention-list">
-              {heroAttention.length ? heroAttention.map((item) => (
-                <div key={item.title} className="hero-attention-item">
-                  <span className={`status-badge status-${item.severity}`}>{item.label}</span>
-                  <span>{item.description}</span>
-                </div>
-              )) : (
-                <div className="hero-attention-item">
-                  <span className="status-badge status-success">Stable</span>
-                  <span>No urgent issues detected across auth, terminal and telemetry.</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="hero-aside">
-            <div className="hero-clock">{formatClock(currentTime)}</div>
-            <div className="hero-meta">Heartbeat {formatLastSeen(lastHeartbeat)}</div>
-            <div className="hero-meta">
-              {stale ? 'Telemetry needs refresh' : 'Telemetry pipeline is healthy'}
-            </div>
-          </div>
-        </section>
+        <DashboardHero
+          currentTime={currentTime}
+          authBadge={authBadge}
+          streamBadge={streamBadge}
+          terminalBadge={terminalBadge}
+          heroAttention={heroAttention}
+          lastHeartbeat={lastHeartbeat}
+          stale={stale}
+        />
 
         <section className="dashboard-grid">
           <aside className="sidebar-stack">
-            <section className="panel control-panel">
-              <div className="panel-header compact-header">
-                <div className="panel-title-wrap">
-                  <span className="panel-icon">
-                    <LockKeyhole size={18} />
-                  </span>
-                  <div>
-                    <h2 className="panel-title">Control access</h2>
-                    <p className="panel-subtitle">Unlock once, then use the same control session everywhere.</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="panel-body stack">
-                {passwordProtectionEnabled ? (
-                  <div className="unlock-form">
-                    <label className="field-label" htmlFor="control-password">Control Password</label>
-                    <input
-                      id="control-password"
-                      className="input"
-                      type="password"
-                      value={passwordInput}
-                      onChange={(event) => setPasswordInput(event.target.value)}
-                      placeholder="Enter startup password"
-                    />
-                    <div className="quick-action-row">
-                      <button
-                        className="button"
-                        type="button"
-                        onClick={() => { void unlockControl(); }}
-                        disabled={createAuthSessionMutation.isPending}
-                      >
-                        {createAuthSessionMutation.isPending ? 'Unlocking...' : 'Unlock'}
-                      </button>
-                      <button
-                        className="ghost-button"
-                        type="button"
-                        onClick={() => { void lockControl(); }}
-                        disabled={!authUnlocked || deleteAuthSessionMutation.isPending}
-                      >
-                        Lock
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-
-                <div className="glass-note">
-                  <span className={`status-badge ${authBadge.tone}`}>{authBadge.label}</span>
-                  <p>{streamError || authHint}</p>
-                </div>
-
-                <div className="stat-grid">
-                  {quickStats.map(({ label, value, hint, icon: Icon }) => (
-                    <div key={label} className="mini-card stat-card">
-                      <div className="stat-card-top">
-                        <span className="panel-icon small-icon">
-                          <Icon size={15} />
-                        </span>
-                        <span className="metric-eyebrow">{label}</span>
-                      </div>
-                      <p className="metric-reading compact-reading">{value}</p>
-                      <p className="muted-note">{hint}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </section>
+            <ControlAccessPanel
+              authBadge={authBadge}
+              authHint={authHint}
+              authUnlocked={authUnlocked}
+              createAuthSessionMutation={createAuthSessionMutation}
+              currentStats={currentStats}
+              deleteAuthSessionMutation={deleteAuthSessionMutation}
+              passwordInput={passwordInput}
+              passwordProtectionEnabled={passwordProtectionEnabled}
+              setPasswordInput={setPasswordInput}
+              streamError={streamError}
+              unlockControl={unlockControl}
+              lockControl={lockControl}
+            />
 
             <SystemReadiness items={readinessItems} />
           </aside>
 
           <main className="workspace-stack">
-            <section className="panel nav-panel">
-              <div className="panel-header compact-header">
-                <div>
-                  <h2 className="panel-title">{panelMeta.title}</h2>
-                  <p className="panel-subtitle">{panelMeta.subtitle}</p>
-                </div>
-                <div className="chip-row">
-                  <span className={`status-badge ${streamBadge.tone}`}>{streamBadge.label}</span>
-                  <span className={`status-badge ${isAdmin ? 'status-success' : 'status-warning'}`}>
-                    {isAdmin ? 'Admin' : 'User mode'}
-                  </span>
-                  <button className="ghost-button compact-action-button" type="button" onClick={() => { void refreshAll(); }}>
-                    <RefreshCw size={16} />
-                    Refresh all
-                  </button>
-                </div>
-              </div>
-
-              <div className="panel-body">
-                <nav className="nav-grid" aria-label="Dashboard navigation">
-                  {PANELS.map(({ id, label, icon: Icon }) => (
-                    <motion.button
-                      key={id}
-                      type="button"
-                      className={`nav-card ${activePanel === id ? 'active' : ''}`}
-                      onClick={() => setActivePanel(id)}
-                      whileHover={{ y: -2 }}
-                      whileTap={{ scale: 0.99 }}
-                    >
-                      <span className="panel-icon nav-icon">
-                        <Icon size={16} />
-                      </span>
-                      <span className="nav-card-label">{label}</span>
-                    </motion.button>
-                  ))}
-                </nav>
-              </div>
-            </section>
+            <DashboardNavigation
+              activePanel={activePanel}
+              isAdmin={isAdmin}
+              onRefreshAll={refreshAll}
+              panels={PANELS}
+              panelMeta={panelMeta}
+              setActivePanel={setActivePanel}
+              streamBadge={streamBadge}
+            />
 
             <AnimatePresence mode="wait" initial={false}>
               {renderContent()}

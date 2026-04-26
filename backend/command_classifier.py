@@ -1,18 +1,38 @@
-"""
-Command Classifier for Terminal Security.
+"""Backend command classification and confirmation policy."""
 
-Classifies commands as safe, dangerous, interactive, or unknown and rejects
-actual shell operator usage without overblocking ordinary arguments.
-"""
+from __future__ import annotations
 
+from dataclasses import asdict, dataclass
 import re
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 
 SHELL_OPERATOR_MESSAGE = (
-    "Shell operators like &&, ||, |, >, <, ;, backticks, and command substitution "
+    "Shell operators like &, &&, ||, |, >, <, ;, backticks, and command substitution "
     "are not allowed for security reasons"
 )
+
+EMPTY_COMMAND_MESSAGE = "Enter a command to see how the backend will handle it."
+SAFE_COMMAND_MESSAGE = "Command matches the allowlist and can run without confirmation."
+DANGEROUS_COMMAND_MESSAGE = "Dangerous commands are blocked."
+INTERACTIVE_COMMAND_MESSAGE = "Interactive commands are not supported in the current subprocess command runner."
+CONFIRMATION_REQUIRED_MESSAGE = "Command is not on the allowlist and requires explicit confirmation."
+
+
+@dataclass(frozen=True)
+class CommandPolicy:
+    """Structured backend decision for one command."""
+
+    command: str
+    classification: str
+    status: str
+    reason: str
+    message: str
+    requires_confirmation: bool
+
+    def to_payload(self) -> dict[str, Any]:
+        """Return a JSON-serializable payload for APIs and websocket messages."""
+        return asdict(self)
 
 
 def contains_dangerous_shell_metachars(command: str) -> bool:
@@ -66,6 +86,9 @@ def contains_dangerous_shell_metachars(command: str) -> bool:
         if char == "&" and next_char == "&":
             return True
 
+        if char == "&":
+            return True
+
         if char == "|" and next_char == "|":
             return True
 
@@ -78,169 +101,225 @@ def contains_dangerous_shell_metachars(command: str) -> bool:
         index += 1
 
     return False
-class CommandClassifier:
-    def __init__(self):
-        # Dangerous command patterns
-        self.dangerous_patterns = [
-            r'rm\s+-rf\s+/',           # Delete root directory
-            r'rm\s+-rf\s+\*',          # Delete all files
-            r'del\s+/[fqs]',           # Windows delete system files
-            r'format\s+',              # Format drives
-            r'fdisk\s+',               # Disk partitioning
-            r'mkfs\.',                 # Make filesystem
-            r'shutdown\s+',            # Shutdown system
-            r'reboot\s+',              # Reboot system
-            r'poweroff\s+',            # Power off system
-            r'halt\s+',                # Halt system
-            r'init\s+0',               # System shutdown
-            r'init\s+6',               # System reboot
-            r'sudo\s+rm\s+-rf',        # Sudo dangerous delete
-            r'sudo\s+del',             # Sudo Windows delete
-            r'sudo\s+format',          # Sudo format
-            r'sudo\s+shutdown',        # Sudo shutdown
-            r'sudo\s+reboot',          # Sudo reboot
-            r'chmod\s+777\s+/',       # Make root writable
-            r'chown\s+.*\s+/',        # Change root ownership
-            r'sudo\s+chmod\s+777',    # Sudo dangerous permissions
-            r'sudo\s+chown\s+.*\s+/', # Sudo dangerous ownership
-            r'dd\s+if=/dev/zero',      # Disk destruction
-            r':\(\)\{\.*:\|.*\}\.*:', # Fork bomb - fixed regex
-            r'eval\s+\$\(.*\)',        # Eval injection
-            r'exec\s+\$\(.*\)',        # Exec injection
-        ]
-        
-        # Interactive commands that need PTY
-        self.interactive_patterns = [
-            r'vim\s+',                  # Vim editor
-            r'vi\s+',                   # Vi editor
-            r'nano\s+',                 # Nano editor
-            r'emacs\s+',                # Emacs editor
-            r'top\s+',                  # Process monitor
-            r'htop\s+',                 # Better process monitor
-            r'less\s+',                 # File viewer
-            r'more\s+',                 # File viewer
-            r'tail\s+-f',               # Follow file
-            r'watch\s+',                # Watch command
-            r'irb\s+',                  # Ruby interactive
-            r'python\s+\s*$',          # Python interactive
-            r'python3\s+\s*$',         # Python3 interactive
-            r'node\s+\s*$',             # Node.js interactive
-            r'ssh\s+',                  # SSH connections
-            r'ftp\s+',                  # FTP connections
-            r'telnet\s+',               # Telnet connections
-            r'mysql\s+',                # MySQL client
-            r'psql\s+',                 # PostgreSQL client
-            r'sqlite3\s+',              # SQLite client
-        ]
-        
-        # Safe commands (whitelist)
-        self.safe_patterns = [
-            r'ls\s*',                   # List files
-            r'dir(\s|$)',               # Windows directory listing
-            r'pwd\s*',                  # Print working directory
-            r'cd\s+',                   # Change directory
-            r'cat\s+',                  # View files
-            r'type\s+',                 # Windows file output
-            r'grep\s+',                 # Search in files
-            r'find\s+',                 # Find files
-            r'where\s+',                # Windows executable lookup
-            r'ps\s+',                   # Process list
-            r'tasklist(\s|$)',          # Windows process list
-            r'netstat(\s|$)',           # Network status
-            r'ipconfig(\s|$)',          # Network config
-            r'systeminfo(\s|$)',        # Windows system info
-            r'kill\s+',                 # Kill processes
-            r'git\s+',                  # Git commands
-            r'npm\s+',                  # NPM commands
-            r'pip\s+',                  # PIP commands
-            r'python\s+.*\.py',        # Python scripts
-            r'node\s+.*\.js',          # Node.js scripts
-            r'mkdir\s+',                # Make directory
-            r'touch\s+',                # Create files
-            r'cp\s+',                   # Copy files
-            r'copy\s+',                 # Windows copy
-            r'mv\s+',                   # Move files
-            r'move\s+',                 # Windows move
-            r'ren\s+',                  # Windows rename
-            r'rename\s+',               # Windows rename
-            r'echo\s+',                 # Echo command
-            r'cls\s*',                  # Clear console
-            r'set(\s|$)',               # Windows environment
-            r'export\s+',               # Export variables
-            r'env\s*',                  # Environment
-            r'whoami\s*',               # Current user
-            r'id\s*',                   # User ID
-            r'date\s*',                 # Date command
-            r'uptime\s*',               # Uptime
-            r'df\s+-h',                 # Disk usage
-            r'du\s+-h',                 # Directory usage
-            r'free\s+-h',               # Memory usage
-            r'uname\s+-a',              # System info
-            r'ping\s+',                 # Ping command
-            r'curl\s+',                 # HTTP requests
-            r'wget\s+',                 # Download files
-            r'tar\s+',                  # Archive commands
-            r'zip\s+',                  # Zip commands
-            r'unzip\s+',                # Unzip commands
-            r'chmod\s+[0-7]{3,4}\s+',  # Safe chmod
-            r'chown\s+.*\s+(?!=/)',     # Safe chown (not root)
-        ]
-    
-    def classify_command(self, command: str) -> Tuple[str, str]:
-        """
-        Classify command as safe, dangerous, or interactive
-        Returns: (classification, reason)
-        """
-        command_lower = command.lower().strip()
 
-        if contains_dangerous_shell_metachars(command):
-            return 'dangerous', SHELL_OPERATOR_MESSAGE
-        
-        # Check for dangerous commands
+
+class CommandClassifier:
+    """Classifies commands and returns a consistent execution policy."""
+
+    def __init__(self):
+        self.dangerous_patterns = [
+            r"rm\s+-rf\s+/",
+            r"rm\s+-rf\s+\*",
+            r"^(del|erase)(\s|$)",
+            r"^(rmdir|rd)(\s|$)",
+            r"format\s+",
+            r"fdisk\s+",
+            r"mkfs\.",
+            r"shutdown(\s|$)",
+            r"reboot(\s|$)",
+            r"poweroff(\s|$)",
+            r"halt(\s|$)",
+            r"init\s+0",
+            r"init\s+6",
+            r"sudo\s+rm\s+-rf",
+            r"sudo\s+del",
+            r"sudo\s+format",
+            r"sudo\s+shutdown",
+            r"sudo\s+reboot",
+            r"chmod\s+777\s+/",
+            r"chown\s+.*\s+/",
+            r"sudo\s+chmod\s+777",
+            r"sudo\s+chown\s+.*\s+/",
+            r"dd\s+if=/dev/zero",
+            r":\(\)\{\.*:\|.*\}\.*:",
+            r"eval\s+\$\(.*\)",
+            r"exec\s+\$\(.*\)",
+        ]
+
+        self.interactive_patterns = [
+            r"vim(\s|$)",
+            r"vi(\s|$)",
+            r"nano(\s|$)",
+            r"emacs(\s|$)",
+            r"top(\s|$)",
+            r"htop(\s|$)",
+            r"less(\s|$)",
+            r"more(\s|$)",
+            r"tail\s+-f",
+            r"watch(\s|$)",
+            r"irb(\s|$)",
+            r"python\s*$",
+            r"python3\s*$",
+            r"node\s*$",
+            r"ssh(\s|$)",
+            r"ftp(\s|$)",
+            r"telnet(\s|$)",
+            r"mysql(\s|$)",
+            r"psql(\s|$)",
+            r"sqlite3(\s|$)",
+        ]
+
+        self.safe_patterns = [
+            r"ls(\s|$)",
+            r"dir(\s|$)",
+            r"pwd(\s|$)",
+            r"cd(\s|$)",
+            r"cat\s+",
+            r"type\s+",
+            r"grep\s+",
+            r"find(\s|$)",
+            r"where(\s|$)",
+            r"ps(\s|$)",
+            r"tasklist(\s|$)",
+            r"netstat(\s|$)",
+            r"ipconfig(\s|$)",
+            r"systeminfo(\s|$)",
+            r"kill(\s|$)",
+            r"git(\s|$)",
+            r"npm(\s|$)",
+            r"pip(\s|$)",
+            r"python\s+.*\.py",
+            r"node\s+.*\.js",
+            r"mkdir(\s|$)",
+            r"touch(\s|$)",
+            r"cp(\s|$)",
+            r"copy(\s|$)",
+            r"mv(\s|$)",
+            r"move(\s|$)",
+            r"ren(\s|$)",
+            r"rename(\s|$)",
+            r"echo(\s|$)",
+            r"cls(\s|$)",
+            r"set(\s|$)",
+            r"export(\s|$)",
+            r"env(\s|$)",
+            r"whoami(\s|$)",
+            r"id(\s|$)",
+            r"date(\s|$)",
+            r"uptime(\s|$)",
+            r"df\s+-h",
+            r"du\s+-h",
+            r"free\s+-h",
+            r"uname\s+-a",
+            r"ping(\s|$)",
+            r"curl(\s|$)",
+            r"wget(\s|$)",
+            r"tar(\s|$)",
+            r"zip(\s|$)",
+            r"unzip(\s|$)",
+            r"chmod\s+[0-7]{3,4}\s+",
+            r"chown\s+.*\s+(?!=/)",
+        ]
+
+    def evaluate_command(self, command: str) -> CommandPolicy:
+        """Return the backend policy that should be applied to the command."""
+        normalized_command = command.strip() if isinstance(command, str) else ""
+        command_lower = normalized_command.lower()
+
+        if not normalized_command:
+            return CommandPolicy(
+                command="",
+                classification="empty",
+                status="idle",
+                reason="empty_command",
+                message=EMPTY_COMMAND_MESSAGE,
+                requires_confirmation=False,
+            )
+
+        if contains_dangerous_shell_metachars(normalized_command):
+            return CommandPolicy(
+                command=normalized_command,
+                classification="dangerous",
+                status="blocked",
+                reason="shell_operator_blocked",
+                message=SHELL_OPERATOR_MESSAGE,
+                requires_confirmation=False,
+            )
+
         for pattern in self.dangerous_patterns:
             if re.search(pattern, command_lower, re.IGNORECASE):
-                return 'dangerous', f"Dangerous command detected: {pattern}"
-        
-        # Check for interactive commands
+                return CommandPolicy(
+                    command=normalized_command,
+                    classification="dangerous",
+                    status="blocked",
+                    reason="dangerous_command",
+                    message=DANGEROUS_COMMAND_MESSAGE,
+                    requires_confirmation=False,
+                )
+
         for pattern in self.interactive_patterns:
             if re.search(pattern, command_lower, re.IGNORECASE):
-                return 'interactive', f"Interactive command: {pattern}"
-        
-        # Check for safe commands
+                return CommandPolicy(
+                    command=normalized_command,
+                    classification="interactive",
+                    status="blocked",
+                    reason="interactive_command",
+                    message=INTERACTIVE_COMMAND_MESSAGE,
+                    requires_confirmation=False,
+                )
+
         for pattern in self.safe_patterns:
-            if re.search(pattern, command_lower, re.IGNORECASE):
-                return 'safe', f"Safe command: {pattern}"
-        
-        # Unknown commands require explicit confirmation.
-        return 'unknown', "Unknown command - not matched by the allowlist"
-    
+            if re.match(pattern, command_lower, re.IGNORECASE):
+                return CommandPolicy(
+                    command=normalized_command,
+                    classification="safe",
+                    status="allowed",
+                    reason="allowlisted_command",
+                    message=SAFE_COMMAND_MESSAGE,
+                    requires_confirmation=False,
+                )
+
+        return CommandPolicy(
+            command=normalized_command,
+            classification="unknown",
+            status="confirmation_required",
+            reason="confirmation_required",
+            message=CONFIRMATION_REQUIRED_MESSAGE,
+            requires_confirmation=True,
+        )
+
+    def classify_command(self, command: str) -> Tuple[str, str]:
+        """Compatibility wrapper returning just classification and message."""
+        policy = self.evaluate_command(command)
+        return policy.classification, policy.message
+
+    def requires_confirmation(self, command: str) -> bool:
+        """Return whether the command needs explicit confirmation before execution."""
+        return self.evaluate_command(command).requires_confirmation
+
     def needs_sudo(self, command: str) -> bool:
-        """Check if command needs sudo confirmation"""
-        classification, _ = self.classify_command(command)
-        return classification in ('dangerous', 'unknown')
-    
+        """Backward-compatible alias for confirmation checks."""
+        return self.requires_confirmation(command)
+
     def is_interactive(self, command: str) -> bool:
-        """Check if command needs PTY for interactive mode"""
-        classification, _ = self.classify_command(command)
-        return classification == 'interactive'
-    
+        """Return whether the command would be blocked as interactive."""
+        return self.evaluate_command(command).classification == "interactive"
+
     def get_dangerous_commands(self) -> List[str]:
-        """Get list of dangerous command descriptions"""
+        """Get list of dangerous command descriptions."""
         return [
-            "Delete system files (rm -rf /)",
+            "Delete system files (rm -rf /, del, rmdir)",
             "Format drives (format)",
-            "Shutdown/reboot system",
+            "Shutdown or reboot the system",
             "Change root permissions",
             "Disk destruction commands",
-            "Fork bombs and injection attacks"
+            "Fork bombs and injection attacks",
         ]
-    
+
     def get_safe_commands_examples(self) -> List[str]:
-        """Get examples of safe commands"""
+        """Get examples of safe commands."""
         return [
             "ls, pwd, cd - Basic navigation",
             "cat, grep, find - File operations",
             "git, npm, pip - Development tools",
             "ps, kill - Process management",
-            "ping, curl - Network tools"
+            "ping, curl - Network tools",
+        ]
+
+    def get_confirmation_guidance(self) -> List[str]:
+        """Get short review guidance for allowlist-miss confirmations."""
+        return [
+            "Verify the executable and arguments are expected.",
+            "Unknown commands run outside the allowlist.",
+            "Shell operators and command substitution remain blocked.",
         ]

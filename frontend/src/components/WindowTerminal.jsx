@@ -1,389 +1,41 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React from 'react';
 import { Copy, RotateCcw, ShieldAlert, Square, Terminal } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
-import { classifyCommand } from '../features/dashboard/utils/commandClassifier';
-
-const MAX_HISTORY = 50;
-
-function formatRelativeRetry(retryUntil) {
-  if (!retryUntil) {
-    return null;
-  }
-
-  const deltaMs = retryUntil - Date.now();
-  return deltaMs > 0 ? Math.ceil(deltaMs / 1000) : 0;
-}
+import { useTerminalSession } from '../features/dashboard/hooks/useTerminalSession';
 
 const WindowTerminal = ({
   authUnlocked,
   passwordProtectionEnabled,
   onAction
 }) => {
-  const [connected, setConnected] = useState(false);
-  const [connectionState, setConnectionState] = useState('idle');
-  const [connectionMessage, setConnectionMessage] = useState('Waiting for terminal access.');
-  const [retryUntil, setRetryUntil] = useState(null);
-  const [output, setOutput] = useState([]);
-  const [currentCommand, setCurrentCommand] = useState('');
-  const [history, setHistory] = useState([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const [safeSuggestions, setSafeSuggestions] = useState([]);
-  const [sudoModal, setSudoModal] = useState(null);
-  const [workingDir, setWorkingDir] = useState('');
-  const [copyState, setCopyState] = useState('idle');
-  const outputEndRef = useRef(null);
-  const wsRef = useRef(null);
-  const reconnectTimeoutRef = useRef(null);
-  const connectWebSocketRef = useRef(null);
-  const reconnectStateRef = useRef('idle');
-  const wasConnectedRef = useRef(false);
-  const intentionalCloseRef = useRef(false);
-
-  const retryCountdown = useMemo(() => formatRelativeRetry(retryUntil), [retryUntil]);
-  const commandSafety = useMemo(() => classifyCommand(currentCommand), [currentCommand]);
-
-  useEffect(() => {
-    if (outputEndRef.current) {
-      outputEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [output]);
-
-  useEffect(() => {
-    if (copyState !== 'done') {
-      return undefined;
-    }
-
-    const timer = setTimeout(() => setCopyState('idle'), 1800);
-    return () => clearTimeout(timer);
-  }, [copyState]);
-
-  useEffect(() => {
-    if (retryUntil == null) {
-      return undefined;
-    }
-
-    const timer = setInterval(() => {
-      if (Date.now() >= retryUntil) {
-        setRetryUntil(null);
-      }
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [retryUntil]);
-
-  const addOutput = useCallback((item) => {
-    setOutput((prev) => [...prev, { ...item, timestamp: Date.now() }]);
-  }, []);
-
-  const closeSocket = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-
-    if (wsRef.current) {
-      intentionalCloseRef.current = true;
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-
-    setConnected(false);
-  }, []);
-
-  const scheduleReconnect = useCallback((delayMs) => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-    }
-
-    reconnectTimeoutRef.current = setTimeout(() => {
-      reconnectTimeoutRef.current = null;
-      reconnectStateRef.current = 'reconnecting';
-      setConnectionState('reconnecting');
-      setConnectionMessage('Attempting to reconnect to the terminal gateway.');
-      connectWebSocketRef.current?.();
-    }, delayMs);
-  }, []);
-
-  const handleMessage = useCallback((message) => {
-    switch (message.type) {
-      case 'welcome':
-        wasConnectedRef.current = true;
-        setConnected(true);
-        setConnectionState('connected');
-        setConnectionMessage('Terminal connected and ready.');
-        setRetryUntil(null);
-        setWorkingDir(message.working_dir);
-        addOutput({ type: 'system', text: 'Connected to terminal server' });
-        addOutput({ type: 'system', text: message.message });
-        wsRef.current?.send(JSON.stringify({ type: 'get_safe_commands' }));
-        break;
-      case 'cwd_changed':
-        setWorkingDir(message.working_dir);
-        addOutput({ type: 'system', text: message.message });
-        break;
-      case 'output':
-        addOutput({ type: 'output', text: message.data });
-        break;
-      case 'command_sent':
-        addOutput({ type: 'command', text: `$ ${message.command}` });
-        break;
-      case 'safe_commands':
-        setSafeSuggestions(message.examples || []);
-        break;
-      case 'sudo_required':
-        setSudoModal({
-          command: message.command,
-          reason: message.reason,
-          warning: message.warning,
-          dangerous_examples: message.dangerous_examples
-        });
-        break;
-      case 'interrupt_sent':
-      case 'info':
-      case 'warning':
-      case 'sudo_confirmed':
-      case 'sudo_cancelled':
-        addOutput({ type: 'warning', text: message.message });
-        break;
-      case 'error':
-        if (message.reason === 'rate_limited') {
-          const retryAt = Date.now() + ((message.retry_after || 1) * 1000);
-          setConnected(false);
-          setRetryUntil(retryAt);
-          setConnectionState('rate_limited');
-          setConnectionMessage(`Rate limited. Retry in about ${message.retry_after}s.`);
-          onAction?.({
-            action: 'terminal_state',
-            status: 'rate_limited',
-            message: `Terminal rate limited. Retry in ${message.retry_after}s.`,
-            severity: 'warning',
-            entity_type: 'terminal',
-            retry_after: message.retry_after,
-            requires_password: message.requires_password ?? false
-          });
-          break;
-        }
-
-        if (message.reason === 'unauthorized') {
-          const state = wasConnectedRef.current ? 'session_expired' : 'unauthorized';
-          setConnected(false);
-          setConnectionState(state);
-          setConnectionMessage(
-            state === 'session_expired'
-              ? 'The control session expired. Unlock again to reconnect.'
-              : 'Unlock control access to use the protected terminal.'
-          );
-          addOutput({
-            type: 'error',
-            text: state === 'session_expired'
-              ? 'Terminal session expired. Unlock again to reconnect.'
-              : 'Terminal access requires an unlocked control session.'
-          });
-          onAction?.({
-            action: 'terminal_state',
-            status: state,
-            message: state === 'session_expired'
-              ? 'Terminal session expired.'
-              : 'Terminal access blocked until control access is unlocked.',
-            severity: 'warning',
-            entity_type: 'terminal',
-            retry_after: message.retry_after ?? null,
-            requires_password: message.requires_password ?? true
-          });
-          break;
-        }
-
-        addOutput({ type: 'error', text: message.message });
-        break;
-      default:
-        break;
-    }
-  }, [addOutput, onAction]);
-
-  const connectWebSocket = useCallback(() => {
-    if (passwordProtectionEnabled && !authUnlocked) {
-      setConnectionState('locked');
-      setConnectionMessage('Unlock control access to start the protected terminal session.');
-      closeSocket();
-      return;
-    }
-
-    try {
-      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const websocket = new WebSocket(`${protocol}://${window.location.hostname}:8003`);
-
-      websocket.onopen = () => {
-        intentionalCloseRef.current = false;
-        reconnectStateRef.current = 'authorizing';
-        setConnectionState('connecting');
-        setConnectionMessage('Authorizing terminal session.');
-        setRetryUntil(null);
-        wsRef.current = websocket;
-      };
-
-      websocket.onmessage = (event) => {
-        const message = JSON.parse(event.data);
-        handleMessage(message);
-      };
-
-      websocket.onclose = (event) => {
-        setConnected(false);
-        wsRef.current = null;
-
-        if (intentionalCloseRef.current) {
-          intentionalCloseRef.current = false;
-          return;
-        }
-
-        if (event.code === 4401 || event.code === 4429) {
-          return;
-        }
-
-        setConnectionState('gateway_down');
-        setConnectionMessage('Terminal gateway is unavailable. Retrying automatically.');
-        scheduleReconnect(3000);
-      };
-
-      websocket.onerror = () => {
-        setConnected(false);
-        setConnectionState('gateway_down');
-        setConnectionMessage('Terminal gateway error. Retrying automatically.');
-      };
-    } catch (error) {
-      setConnected(false);
-      setConnectionState('gateway_down');
-      setConnectionMessage(`Failed to connect: ${error.message}`);
-      scheduleReconnect(3000);
-    }
-  }, [authUnlocked, closeSocket, handleMessage, passwordProtectionEnabled, scheduleReconnect]);
-
-  useEffect(() => {
-    connectWebSocketRef.current = connectWebSocket;
-  }, [connectWebSocket]);
-
-  useEffect(() => {
-    connectWebSocket();
-
-    return () => {
-      closeSocket();
-    };
-  }, [closeSocket, connectWebSocket]);
-
-  const sendCommand = (command) => {
-    if (!wsRef.current || !connected) {
-      addOutput({ type: 'error', text: 'Terminal not connected. Please wait...' });
-      return;
-    }
-
-    if (!command.trim()) {
-      return;
-    }
-
-    setHistory((prev) => [...prev, { command, timestamp: Date.now() }].slice(-MAX_HISTORY));
-    setHistoryIndex(-1);
-
-    try {
-      wsRef.current.send(JSON.stringify({
-        type: 'execute_command',
-        command
-      }));
-
-      onAction?.({
-        action: 'terminal_command',
-        status: 'queued',
-        message: `Command queued as ${commandSafety.classification}.`,
-        severity: commandSafety.classification === 'dangerous' ? 'warning' : 'neutral',
-        entity_type: 'terminal',
-        entity_id: command
-      });
-    } catch (error) {
-      addOutput({ type: 'error', text: `Failed to send command: ${error.message}` });
-    }
-
-    setCurrentCommand('');
-  };
-
-  const interruptCommand = () => {
-    if (wsRef.current && connected) {
-      wsRef.current.send(JSON.stringify({ type: 'interrupt' }));
-      addOutput({ type: 'warning', text: 'Interrupt signal sent.' });
-    }
-  };
-
-  const confirmSudo = (confirmed) => {
-    if (wsRef.current && connected && sudoModal) {
-      wsRef.current.send(JSON.stringify({
-        type: 'sudo_confirm',
-        confirmed
-      }));
-    }
-    setSudoModal(null);
-  };
-
-  const clearTerminal = () => setOutput([]);
-
-  const copyOutput = async () => {
-    try {
-      await navigator.clipboard.writeText(output.map((item) => item.text).join('\n'));
-      setCopyState('done');
-    } catch {
-      setCopyState('error');
-    }
-  };
-
-  const copyLine = async (text) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopyState('done');
-    } catch {
-      setCopyState('error');
-    }
-  };
-
-  const handleReconnect = () => {
-    closeSocket();
-    setConnectionState('reconnecting');
-    setConnectionMessage('Manual reconnect requested.');
-    connectWebSocket();
-  };
-
-  const handleKeyDown = (event) => {
-    if (event.key === 'Enter') {
-      sendCommand(currentCommand);
-      return;
-    }
-
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      if (history.length > 0) {
-        const newIndex = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1);
-        setHistoryIndex(newIndex);
-        setCurrentCommand(history[newIndex].command);
-      }
-      return;
-    }
-
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      if (historyIndex !== -1) {
-        if (historyIndex >= history.length - 1) {
-          setHistoryIndex(-1);
-          setCurrentCommand('');
-        } else {
-          const newIndex = historyIndex + 1;
-          setHistoryIndex(newIndex);
-          setCurrentCommand(history[newIndex].command);
-        }
-      }
-      return;
-    }
-
-    if (event.key === 'c' && event.ctrlKey) {
-      event.preventDefault();
-      interruptCommand();
-    }
-  };
+  const {
+    connected,
+    connectionState,
+    connectionMessage,
+    retryCountdown,
+    output,
+    currentCommand,
+    setCurrentCommand,
+    history,
+    safeSuggestions,
+    confirmCommandPrompt,
+    workingDir,
+    copyState,
+    outputEndRef,
+    commandSafety,
+    interruptCommand,
+    confirmPendingCommand,
+    clearTerminal,
+    copyOutput,
+    copyLine,
+    reconnect,
+    handleKeyDown
+  } = useTerminalSession({
+    authUnlocked,
+    passwordProtectionEnabled,
+    onAction
+  });
 
   const terminalStatus = connected
     ? { className: 'status-success', label: 'Connected' }
@@ -425,7 +77,7 @@ const WindowTerminal = ({
           <span className={`status-badge ${passwordProtectionEnabled ? 'status-warning' : 'status-neutral'}`}>
             {passwordProtectionEnabled ? 'Password gated' : 'Password disabled'}
           </span>
-          <span className={`status-badge status-${commandSafety.classification === 'dangerous' ? 'danger' : commandSafety.classification === 'interactive' ? 'warning' : commandSafety.classification === 'safe' ? 'success' : 'neutral'}`}>
+          <span className={`status-badge status-${commandSafety.classification === 'dangerous' ? 'danger' : commandSafety.classification === 'interactive' || commandSafety.classification === 'unknown' ? 'warning' : commandSafety.classification === 'safe' ? 'success' : 'neutral'}`}>
             {commandSafety.classification}
           </span>
         </div>
@@ -468,11 +120,11 @@ const WindowTerminal = ({
             </div>
 
             <div className="terminal-actions">
-              <button className="ghost-button" type="button" onClick={copyOutput}>
+              <button className="ghost-button" type="button" onClick={() => { void copyOutput(); }}>
                 <Copy size={16} />
                 {copyState === 'done' ? 'Copied' : 'Copy all'}
               </button>
-              <button className="ghost-button" type="button" onClick={handleReconnect}>
+              <button className="ghost-button" type="button" onClick={reconnect}>
                 <RotateCcw size={16} />
                 Reconnect
               </button>
@@ -537,7 +189,7 @@ const WindowTerminal = ({
                     : 'Connecting to terminal gateway'}
               />
               <div className="terminal-classifier-row">
-                <span className={`status-badge status-${commandSafety.classification === 'dangerous' ? 'danger' : commandSafety.classification === 'interactive' ? 'warning' : commandSafety.classification === 'safe' ? 'success' : 'neutral'}`}>
+                <span className={`status-badge status-${commandSafety.classification === 'dangerous' ? 'danger' : commandSafety.classification === 'interactive' || commandSafety.classification === 'unknown' ? 'warning' : commandSafety.classification === 'safe' ? 'success' : 'neutral'}`}>
                   {commandSafety.classification}
                 </span>
                 <span className="muted-note wrap-text">{commandSafety.reason}</span>
@@ -570,7 +222,7 @@ const WindowTerminal = ({
       </div>
 
       <AnimatePresence>
-        {sudoModal && (
+        {confirmCommandPrompt && (
           <motion.div
             className="modal-backdrop"
             initial={{ opacity: 0 }}
@@ -589,27 +241,27 @@ const WindowTerminal = ({
                   <ShieldAlert size={18} />
                 </span>
                 <div>
-                  <h3 className="panel-title">Dangerous command detected</h3>
-                  <p className="panel-subtitle">{sudoModal.warning}</p>
+                  <h3 className="panel-title">Confirmation required</h3>
+                  <p className="panel-subtitle">{confirmCommandPrompt.message}</p>
                 </div>
               </div>
 
               <div className="mini-card" style={{ marginTop: '18px' }}>
-                <div className="terminal-line error">{sudoModal.command}</div>
-                <div className="muted-note">{sudoModal.reason}</div>
+                <div className="terminal-line error">{confirmCommandPrompt.command}</div>
+                <div className="muted-note">{confirmCommandPrompt.reason}</div>
               </div>
 
               <div className="stack" style={{ marginTop: '16px' }}>
-                {sudoModal.dangerous_examples.map((example) => (
+                {confirmCommandPrompt.confirmation_guidance.map((example) => (
                   <div key={example} className="muted-note">{example}</div>
                 ))}
               </div>
 
               <div className="modal-actions">
-                <button className="ghost-button" type="button" style={{ flex: 1 }} onClick={() => confirmSudo(false)}>
+                <button className="ghost-button" type="button" style={{ flex: 1 }} onClick={() => confirmPendingCommand(false)}>
                   Cancel
                 </button>
-                <button className="danger-button" type="button" style={{ flex: 1 }} onClick={() => confirmSudo(true)}>
+                <button className="danger-button" type="button" style={{ flex: 1 }} onClick={() => confirmPendingCommand(true)}>
                   Execute
                 </button>
               </div>

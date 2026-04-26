@@ -100,6 +100,62 @@ describe('App auth mode rendering', () => {
         }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
       }
 
+      if (url.endsWith('/api/system/info')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          hostname: 'dev-box',
+          platform: 'Windows',
+          platform_release: '11',
+          platform_version: '10.0',
+          architecture: 'AMD64',
+          processor: 'x86',
+          cpu_count: 8,
+          memory_total: 17179869184,
+          memory_available: 8589934592
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+
+      if (url.endsWith('/api/system/performance')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          cpu_percent: 11.2,
+          cpu_count: 8,
+          memory: { total: 1, available: 1, percent: 1, used: 1, free: 1 },
+          disk: { total: 1, used: 1, free: 1, percent: 1 },
+          timestamp: Date.now()
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+
+      if (url.endsWith('/api/system/is-admin')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          is_admin: true,
+          platform: 'Windows'
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+
+      if (url.includes('/api/processes')) {
+        return Promise.resolve(new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        }));
+      }
+
+      if (url.includes('/api/ports')) {
+        return Promise.resolve(new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        }));
+      }
+
+      if (url.endsWith('/api/network/info')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          interfaces: {},
+          default_gateway: 'Unknown',
+          hostname: 'dev-box'
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        }));
+      }
+
       return Promise.resolve(new Response(JSON.stringify({}), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }

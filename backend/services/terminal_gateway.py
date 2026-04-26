@@ -1,14 +1,12 @@
 import asyncio
 from http.cookies import SimpleCookie
 import json
-import os
 import threading
 import time
 
 from websockets import exceptions as websocket_exceptions
 from websockets.legacy.server import serve as websocket_serve
 
-from dashboard_pids import register_dashboard_pid
 from security import (
     PROTECTED_ENDPOINTS_MESSAGE,
     SESSION_COOKIE_NAME,
@@ -27,8 +25,8 @@ from terminal_session import TerminalSessionManager
 class TerminalGatewayService:
     """Owns terminal websocket lifecycle and session routing."""
 
-    def __init__(self, event_bus, host: str = "127.0.0.1", port: int = 8003):
-        self.event_bus = event_bus
+    def __init__(self, live_updates, host: str = "127.0.0.1", port: int = 8003):
+        self.live_updates = live_updates
         self.host = host
         self.port = port
         self.terminal_manager = TerminalSessionManager()
@@ -149,7 +147,6 @@ class TerminalGatewayService:
         try:
             start_server = websocket_serve(self.handle_websocket, self.host, self.port)
             loop.run_until_complete(start_server)
-            register_dashboard_pid("websocket", os.getpid())
             self._publish_action_event(
                 "terminal_server",
                 "ready",
@@ -209,7 +206,7 @@ class TerminalGatewayService:
             if requires_password is None
             else requires_password
         )
-        self.event_bus.publish("action", {
+        self.live_updates.publish("action", {
             "action": action,
             "status": status,
             "message": message,

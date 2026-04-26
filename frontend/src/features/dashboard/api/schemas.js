@@ -24,6 +24,11 @@ export const authSessionDeleteSchema = z.object({
   message: z.string().optional()
 });
 
+export const systemAdminSchema = z.object({
+  is_admin: z.boolean(),
+  platform: z.string()
+});
+
 export const systemInfoSchema = z.object({
   platform: z.string(),
   platform_release: z.string(),

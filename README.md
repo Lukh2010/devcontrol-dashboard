@@ -143,7 +143,7 @@ Current safeguards:
 - `X-DevControl-Password` support for protected HTTP actions and terminal handshake
 - dashboard-owned PID restriction for process and port termination
 - command classification with dangerous-command blocking and explicit confirmation for unknown commands
-- shell operators such as `&&`, `|`, `>`, `<`, backticks, and command substitution are blocked for user input
+- shell operators such as `&`, `&&`, `|`, `>`, `<`, backticks, and command substitution are blocked for user input
 - in-memory rate limiting for auth, protected HTTP actions, and terminal handshakes
 - localhost-only frontend, backend, and terminal binding
 - admin check for process termination on Windows
@@ -165,8 +165,7 @@ Backend services:
 - telemetry collector
 - action executor
 - terminal gateway
-- stream processor
-- in-memory event bus
+- live update hub
 
 The frontend uses a typed data layer:
 
@@ -183,12 +182,12 @@ devcontrol-dashboard/
 |   |-- app.py
 |   |-- command_classifier.py
 |   |-- dashboard_pids.py
-|   |-- event_bus.py
 |   |-- requirements.txt
 |   |-- security.py
 |   |-- service_runtime.py
 |   |-- terminal_session.py
 |   `-- services/
+|       `-- live_update_hub.py
 |-- frontend/
 |   |-- package.json
 |   |-- package-lock.json

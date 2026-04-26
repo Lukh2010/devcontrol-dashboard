@@ -141,10 +141,10 @@ def test_collect_processes_derives_cpu_percent_from_inventory_cpu_time(monkeypat
     ])
     service = TelemetryCollectorService(FakeEventBus(), inventory_service=inventory)
 
-    monkeypatch.setattr("services.telemetry_service.platform.system", lambda: "Linux")
-    monkeypatch.setattr("services.telemetry_service.psutil.cpu_count", lambda: 4)
+    monkeypatch.setattr("services.telemetry_collection.platform.system", lambda: "Linux")
+    monkeypatch.setattr("services.telemetry_collection.psutil.cpu_count", lambda: 4)
     time_values = iter([100.0, 101.0])
-    monkeypatch.setattr("services.telemetry_service.time.time", lambda: next(time_values))
+    monkeypatch.setattr("services.telemetry_collection.time.time", lambda: next(time_values))
 
     first_snapshot = service.collect_processes()
 
@@ -180,7 +180,7 @@ def test_collect_processes_uses_windows_live_cpu_cache_when_it_is_higher(monkeyp
     ])
     service = TelemetryCollectorService(FakeEventBus(), inventory_service=inventory)
 
-    monkeypatch.setattr("services.telemetry_service.platform.system", lambda: "Windows")
+    monkeypatch.setattr("services.telemetry_collection.platform.system", lambda: "Windows")
     monkeypatch.setattr(service, "_update_inventory_cpu_cache", lambda records: {10: 0.0123})
     monkeypatch.setattr(service, "_update_windows_live_cpu_cache", lambda pids: {10: 0.0876})
 
