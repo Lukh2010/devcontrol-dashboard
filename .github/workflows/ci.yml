@@ -150,10 +150,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Generate smoke-test control password
+        run: |
+          python - <<'PY' >> "$GITHUB_ENV"
+          import secrets
+
+          print(f"DEVCONTROL_PASSWORD={secrets.token_urlsafe(32)}")
+          PY
+
       - name: Start backend
         working-directory: backend
-        env:
-          DEVCONTROL_PASSWORD: ci-password
         run: |
           python app.py > ../backend-smoke.log 2>&1 &
           echo $! > ../backend-smoke.pid
@@ -186,6 +192,7 @@ jobs:
           python - <<'PY'
           import http.cookiejar
           import json
+          import os
           import urllib.error
           import urllib.request
 
@@ -220,14 +227,15 @@ jobs:
           auth_status = request_json("/api/auth/status")
           assert auth_status["enabled"] is True
           assert auth_status["session_active"] is False
+          control_password = os.environ["DEVCONTROL_PASSWORD"]
 
-          invalid = request_json("/api/auth/validate", method="POST", body={"password": "wrong"})
+          invalid = request_json("/api/auth/validate", method="POST", body={"password": f"{control_password}-invalid"})
           assert invalid["valid"] is False
 
-          valid = request_json("/api/auth/validate", method="POST", body={"password": "ci-password"})
+          valid = request_json("/api/auth/validate", method="POST", body={"password": control_password})
           assert valid["valid"] is True
 
-          create_session = request_json("/api/auth/session", method="POST", body={"password": "ci-password"})
+          create_session = request_json("/api/auth/session", method="POST", body={"password": control_password})
           assert create_session["valid"] is True
           assert create_session["session_active"] is True
 
@@ -276,7 +284,7 @@ jobs:
             "/api/commands/run",
             method="POST",
             body={"command": "echo ci"},
-            headers={"X-DevControl-Password": "ci-password"}
+            headers={"X-DevControl-Password": control_password}
           )
           assert authorized["success"] is True
           assert "ci" in authorized["stdout"].lower()
@@ -284,7 +292,7 @@ jobs:
           request_json(
             "/api/port/65535",
             method="DELETE",
-            headers={"X-DevControl-Password": "ci-password"},
+            headers={"X-DevControl-Password": control_password},
             expected_status=404
           )
 
