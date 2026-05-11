@@ -175,6 +175,20 @@ export function useTerminalSession({
         break;
       case 'command_sent':
         addOutput({ type: 'command', text: `$ ${message.command}` });
+        setHistory((prev) => {
+          const next = [...prev];
+          for (let index = next.length - 1; index >= 0; index -= 1) {
+            if (next[index].command === message.command) {
+              next[index] = {
+                ...next[index],
+                classification: message.classification || next[index].classification,
+                status: 'running'
+              };
+              return next;
+            }
+          }
+          return next;
+        });
         break;
       case 'safe_commands':
         setSafeSuggestions(message.examples || []);
@@ -219,22 +233,66 @@ export function useTerminalSession({
         addOutput({ type: 'warning', text: message.message });
         break;
       case 'command_result':
-        setHistory((prev) => prev.map((entry, index) => (
-          index === prev.length - 1 && entry.command === message.command
-            ? {
-              ...entry,
-              classification: message.classification,
-              return_code: message.return_code,
-              success: message.success
+        setHistory((prev) => {
+          const next = [...prev];
+          for (let index = next.length - 1; index >= 0; index -= 1) {
+            if (next[index].command === message.command) {
+              next[index] = {
+                ...next[index],
+                classification: message.classification,
+                return_code: message.return_code,
+                success: message.success,
+                status: message.status || (message.success ? 'completed' : 'failed'),
+                reason: message.reason || null,
+                message: message.message || null,
+                timed_out: Boolean(message.timed_out),
+                completed_at: message.timestamp ? message.timestamp * 1000 : Date.now()
+              };
+              return next;
             }
-            : entry
-        )));
+          }
+          return [...next, {
+            command: message.command,
+            timestamp: Date.now(),
+            classification: message.classification,
+            return_code: message.return_code,
+            success: message.success,
+            status: message.status || (message.success ? 'completed' : 'failed'),
+            reason: message.reason || null,
+            message: message.message || null,
+            timed_out: Boolean(message.timed_out),
+            completed_at: message.timestamp ? message.timestamp * 1000 : Date.now()
+          }].slice(-MAX_HISTORY);
+        });
         addOutput({
           type: message.success ? 'system' : 'warning',
-          text: `Command exited with code ${message.return_code}`
+          text: message.return_code == null
+            ? (message.message || `Command ${message.status || 'finished'}`)
+            : `Command exited with code ${message.return_code}`
         });
         break;
       case 'error':
+        if (message.classification || message.reason) {
+          setHistory((prev) => {
+            const next = [...prev];
+            for (let index = next.length - 1; index >= 0; index -= 1) {
+              if (next[index].status === 'queued' || next[index].status === 'running') {
+                next[index] = {
+                  ...next[index],
+                  classification: message.classification || next[index].classification,
+                  status: 'blocked',
+                  reason: message.reason || 'error',
+                  message: message.message,
+                  success: false,
+                  completed_at: Date.now()
+                };
+                return next;
+              }
+            }
+            return next;
+          });
+        }
+
         if (message.reason === 'rate_limited') {
           const retryAt = Date.now() + ((message.retry_after || 1) * 1000);
           setConnected(false);
@@ -355,7 +413,18 @@ export function useTerminalSession({
       return;
     }
 
-    setHistory((prev) => [...prev, { command, timestamp: Date.now() }].slice(-MAX_HISTORY));
+    setHistory((prev) => [...prev, {
+      command,
+      timestamp: Date.now(),
+      classification: commandSafety.classification,
+      status: 'queued',
+      reason: commandSafety.reason_code || null,
+      message: commandSafety.message || null,
+      return_code: null,
+      success: null,
+      timed_out: false,
+      completed_at: null
+    }].slice(-MAX_HISTORY));
     setHistoryIndex(-1);
 
     try {
@@ -377,7 +446,15 @@ export function useTerminalSession({
     }
 
     setCurrentCommand('');
-  }, [addOutput, commandSafety.classification, commandSafety.status, connected, onAction]);
+  }, [
+    addOutput,
+    commandSafety.classification,
+    commandSafety.message,
+    commandSafety.reason_code,
+    commandSafety.status,
+    connected,
+    onAction
+  ]);
 
   const interruptCommand = useCallback(() => {
     if (wsRef.current && connected) {

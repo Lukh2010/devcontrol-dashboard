@@ -44,6 +44,18 @@ def _parse_limit(value: str | None, default: int = 100) -> int | None:
     return min(parsed, 500)
 
 
+def _parse_positive_int(value: str | None) -> int | None:
+    if value is None or value == "":
+        return None
+
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+
+    return parsed if parsed > 0 else None
+
+
 def _parse_last_event_id(value: str | None) -> int | None:
     if value is None or value == "":
         return None
@@ -253,7 +265,22 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
         payload, status = runtime.actions.kill_process_by_port(
             port,
             is_admin=runtime.telemetry.collect_is_admin(),
-            expected_pid=_parse_limit(request.args.get("pid"), default=0),
+            expected_pid=_parse_positive_int(request.args.get("pid")),
+            expected_protocol=request.args.get("protocol"),
+            expected_local_address=request.args.get("local_address"),
+        )
+        return jsonify(payload), status
+
+    @app.route("/api/port/<int:port>/stop-preview")
+    def preview_port_stop(port):
+        auth_error = require_control_password("stop_preview")
+        if auth_error:
+            return auth_error
+
+        payload, status = runtime.actions.preview_port_stop(
+            port,
+            is_admin=runtime.telemetry.collect_is_admin(),
+            expected_pid=_parse_positive_int(request.args.get("pid")),
             expected_protocol=request.args.get("protocol"),
             expected_local_address=request.args.get("local_address"),
         )
@@ -289,6 +316,18 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
             return auth_error
 
         payload, status = runtime.actions.kill_process(
+            pid=pid,
+            is_admin=runtime.telemetry.collect_is_admin()
+        )
+        return jsonify(payload), status
+
+    @app.route("/api/processes/<int:pid>/stop-preview")
+    def preview_process_stop(pid):
+        auth_error = require_control_password("stop_preview")
+        if auth_error:
+            return auth_error
+
+        payload, status = runtime.actions.preview_process_stop(
             pid=pid,
             is_admin=runtime.telemetry.collect_is_admin()
         )

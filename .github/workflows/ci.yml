@@ -96,7 +96,19 @@ jobs:
       - name: Audit backend dependencies
         if: matrix.python-version == '3.12'
         working-directory: backend
-        run: python -m pip_audit -r requirements.txt --progress-spinner off
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pip_audit -r requirements.txt --progress-spinner off 2>&1 | tee ../pip-audit-py312.log
+
+      - name: Upload backend audit log on failure
+        if: failure() && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-log-py312
+          path: pip-audit-py312.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Run backend pytest suite
         working-directory: backend
@@ -229,6 +241,16 @@ jobs:
           assert auth_status["session_active"] is False
           control_password = os.environ["DEVCONTROL_PASSWORD"]
 
+          health = request_json("/api/health")
+          assert health["api"]["ready"] is True
+          assert health["api"]["host"] == "127.0.0.1"
+          assert health["password"]["enabled"] is True
+          assert health["password"]["session_active"] is False
+
+          locked_network = request_json("/api/network/info")
+          assert locked_network["sensitive_masked"] is True
+          assert "interfaces" in locked_network
+
           invalid = request_json("/api/auth/validate", method="POST", body={"password": f"{control_password}-invalid"})
           assert invalid["valid"] is False
 
@@ -256,6 +278,7 @@ jobs:
 
           network = request_json("/api/network/info")
           assert "interfaces" in network
+          assert network.get("sensitive_masked") is not True
 
           cookie_authorized = request_json(
             "/api/commands/run",
@@ -542,8 +565,8 @@ jobs:
             --format sarif \
             --output /workdir/trivy-results.sarif \
             --exit-code 1 \
-            /workdir
-          exit_code=$?
+            /workdir 2>&1 | tee trivy-scan.log
+          exit_code=${PIPESTATUS[0]}
           echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
           exit 0
 
@@ -569,7 +592,19 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: trivy-results
-          path: trivy-results.sarif
+          path: |
+            trivy-results.sarif
+            trivy-scan.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload Trivy log on scan error
+        if: steps.trivy_scan.outputs.exit_code != '0' && steps.trivy_sarif.outputs.exists != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-scan-log
+          path: trivy-scan.log
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Fail on Trivy findings or scan errors

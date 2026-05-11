@@ -52,6 +52,18 @@ class TerminalCommandExecutorMixin:
                     "classification": classification,
                     "reason": policy.reason,
                 })
+                await self.send_message({
+                    "type": "command_result",
+                    "command": command,
+                    "classification": classification,
+                    "status": "blocked",
+                    "reason": policy.reason,
+                    "message": policy.message,
+                    "return_code": None,
+                    "success": False,
+                    "timed_out": False,
+                    "timestamp": time.time(),
+                })
                 return
 
             if policy.requires_confirmation:
@@ -98,6 +110,18 @@ class TerminalCommandExecutorMixin:
                 "type": "confirm_command_cancelled",
                 "message": "Command cancelled",
             })
+            await self.send_message({
+                "type": "command_result",
+                "command": self.pending_command,
+                "classification": self.pending_classification or "unknown",
+                "status": "cancelled",
+                "reason": "confirmation_cancelled",
+                "message": "Command cancelled",
+                "return_code": None,
+                "success": False,
+                "timed_out": False,
+                "timestamp": time.time(),
+            })
 
         self.pending_command = ""
         self.pending_classification = ""
@@ -111,38 +135,41 @@ class TerminalCommandExecutorMixin:
             return os.path.abspath(expanded)
         return os.path.abspath(os.path.join(self.working_dir, expanded))
 
-    async def _handle_builtin_command(self, command: str) -> bool:
+    async def _handle_builtin_command(self, command: str) -> dict | None:
         try:
             parts = parse_command_args(command)
         except ValueError as exc:
+            message = f"Could not parse command: {exc}"
             await self.send_message({
                 "type": "error",
-                "message": f"Could not parse command: {exc}",
+                "message": message,
             })
-            return True
+            return {"success": False, "reason": "parse_error", "message": message}
 
         if not parts:
-            return True
+            return {"success": False, "reason": "empty_command", "message": "Command must contain an executable"}
 
         if parts[0].lower() != "cd":
-            return False
+            return None
 
         target = parts[1] if len(parts) > 1 else "~"
         resolved_dir = self._resolve_directory(target)
         if not os.path.isdir(resolved_dir):
+            message = f"Directory not found: {resolved_dir}"
             await self.send_message({
                 "type": "error",
-                "message": f"Directory not found: {resolved_dir}",
+                "message": message,
             })
-            return True
+            return {"success": False, "reason": "directory_not_found", "message": message}
 
         self.working_dir = resolved_dir
+        message = f"Working directory changed to {self.working_dir}"
         await self.send_message({
             "type": "cwd_changed",
             "working_dir": self.working_dir,
-            "message": f"Working directory changed to {self.working_dir}",
+            "message": message,
         })
-        return True
+        return {"success": True, "reason": None, "message": message}
 
     async def _execute_command_internal(self, command: str, classification: str):
         """Execute a validated non-interactive command without using a shell."""
@@ -155,22 +182,62 @@ class TerminalCommandExecutorMixin:
                 "classification": classification,
             })
 
-            if await self._handle_builtin_command(command):
+            builtin_result = await self._handle_builtin_command(command)
+            if builtin_result is not None:
+                success = bool(builtin_result.get("success"))
+                await self.send_message({
+                    "type": "command_result",
+                    "command": command,
+                    "classification": classification,
+                    "status": "completed" if success else "failed",
+                    "reason": builtin_result.get("reason"),
+                    "message": builtin_result.get("message") or "Command completed",
+                    "return_code": 0 if success else 1,
+                    "success": success,
+                    "timed_out": False,
+                    "timestamp": time.time(),
+                })
                 return
 
             try:
                 args = parse_command_args(command)
             except ValueError as exc:
+                message = f"Command could not be parsed safely: {exc}"
                 await self.send_message({
                     "type": "error",
-                    "message": f"Command could not be parsed safely: {exc}",
+                    "message": message,
+                })
+                await self.send_message({
+                    "type": "command_result",
+                    "command": command,
+                    "classification": classification,
+                    "status": "blocked",
+                    "reason": "parse_error",
+                    "message": message,
+                    "return_code": None,
+                    "success": False,
+                    "timed_out": False,
+                    "timestamp": time.time(),
                 })
                 return
 
             if not args:
+                message = "Command must contain an executable"
                 await self.send_message({
                     "type": "error",
-                    "message": "Command must contain an executable",
+                    "message": message,
+                })
+                await self.send_message({
+                    "type": "command_result",
+                    "command": command,
+                    "classification": classification,
+                    "status": "blocked",
+                    "reason": "empty_executable",
+                    "message": message,
+                    "return_code": None,
+                    "success": False,
+                    "timed_out": False,
+                    "timestamp": time.time(),
                 })
                 return
 
@@ -181,11 +248,35 @@ class TerminalCommandExecutorMixin:
                         "type": "error",
                         "message": stderr_text,
                     })
+                    await self.send_message({
+                        "type": "command_result",
+                        "command": command,
+                        "classification": classification,
+                        "status": "failed",
+                        "reason": "builtin_error",
+                        "message": stderr_text,
+                        "return_code": 1,
+                        "success": False,
+                        "timed_out": False,
+                        "timestamp": time.time(),
+                    })
                     return
 
                 await self.send_message({
                     "type": "output",
                     "data": stdout_text,
+                    "timestamp": time.time(),
+                })
+                await self.send_message({
+                    "type": "command_result",
+                    "command": command,
+                    "classification": classification,
+                    "status": "completed",
+                    "reason": None,
+                    "message": "Command completed",
+                    "return_code": 0,
+                    "success": True,
+                    "timed_out": False,
                     "timestamp": time.time(),
                 })
                 return
@@ -200,6 +291,18 @@ class TerminalCommandExecutorMixin:
                             await self.send_message({
                                 "type": "error",
                                 "message": "Administrator privileges required. Please run the dashboard as Administrator.",
+                            })
+                            await self.send_message({
+                                "type": "command_result",
+                                "command": command,
+                                "classification": classification,
+                                "status": "blocked",
+                                "reason": "admin_required",
+                                "message": "Administrator privileges required. Please run the dashboard as Administrator.",
+                                "return_code": None,
+                                "success": False,
+                                "timed_out": False,
+                                "timestamp": time.time(),
                             })
                             return
 
@@ -234,6 +337,18 @@ class TerminalCommandExecutorMixin:
                     "type": "error",
                     "message": "Command execution timed out",
                 })
+                await self.send_message({
+                    "type": "command_result",
+                    "command": command,
+                    "classification": classification,
+                    "status": "timeout",
+                    "reason": "timeout",
+                    "message": "Command execution timed out",
+                    "return_code": None,
+                    "success": False,
+                    "timed_out": True,
+                    "timestamp": time.time(),
+                })
                 return
             finally:
                 self.process = None
@@ -259,8 +374,12 @@ class TerminalCommandExecutorMixin:
                 "type": "command_result",
                 "command": command,
                 "classification": classification,
+                "status": "completed" if process.returncode == 0 else "failed",
+                "reason": None if process.returncode == 0 else "nonzero_exit",
+                "message": f"Command exited with code {process.returncode}",
                 "return_code": process.returncode,
                 "success": process.returncode == 0,
+                "timed_out": False,
                 "timestamp": time.time(),
             })
             print(f"Command executed: {command}, Return code: {process.returncode}")

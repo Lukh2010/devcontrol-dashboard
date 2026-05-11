@@ -1,7 +1,7 @@
 import React, { useDeferredValue, useMemo, useState } from 'react';
 import { Network, RefreshCw, Search, ShieldAlert, Trash2 } from 'lucide-react';
 
-import { useKillPortMutation } from '../features/dashboard/hooks/useActionMutations';
+import { useKillPortMutation, usePreviewPortStopMutation } from '../features/dashboard/hooks/useActionMutations';
 import ConfirmDialog from './ConfirmDialog';
 
 function formatUpdatedAt(timestamp) {
@@ -121,6 +121,24 @@ function buildPortDetails(portInfo) {
   ].filter(Boolean);
 }
 
+function buildPortPreviewDetails(portInfo, preview) {
+  const target = preview?.target || {};
+  const details = [
+    `${target.process_name || portInfo?.process_name} | PID ${target.pid ?? portInfo?.pid}`,
+    `Port: ${target.local_address || portInfo?.local_address || 'unknown host'}:${target.port ?? portInfo?.port}`,
+    `Protocol: ${target.protocol || portInfo?.protocol || 'tcp'} | State: ${portInfo?.state || portInfo?.status || 'unknown'}`,
+    `Owner scope: ${target.owner_scope || portInfo?.owner_scope || 'unknown'}`,
+    `Preview: ${preview?.message || 'Checking stop policy...'}`,
+    preview?.reason ? `Reason: ${preview.reason}` : null,
+    preview?.allowed === false ? 'This stop is blocked by the current policy.' : null,
+    preview?.allowed === true ? 'This listener was verified by the backend dry run.' : null,
+    preview?.matches?.length ? `Matching listeners: ${preview.matches.length}` : null,
+    portInfo?.sensitive_masked ? 'Sensitive listener details are locked until control access is unlocked.' : (portInfo?.exe_path || null)
+  ];
+
+  return details.filter(Boolean);
+}
+
 const PortControl = ({
   ports,
   loading,
@@ -136,9 +154,11 @@ const PortControl = ({
   const [dashboardOnly, setDashboardOnly] = useState(false);
   const [killableOnly, setKillableOnly] = useState(false);
   const [pendingPort, setPendingPort] = useState(null);
+  const [pendingPreview, setPendingPreview] = useState(null);
 
   const deferredSearch = useDeferredValue(search);
   const killPortMutation = useKillPortMutation('');
+  const previewPortMutation = usePreviewPortStopMutation('');
 
   const visiblePorts = useMemo(() => {
     const normalizedSearch = deferredSearch.trim().toLowerCase();
@@ -162,7 +182,7 @@ const PortControl = ({
       .sort((left, right) => comparePorts(left, right, sort));
   }, [dashboardOnly, deferredSearch, killableOnly, ports, sort]);
 
-  const requestKill = (portInfo) => {
+  const requestKill = async (portInfo) => {
     if (passwordProtectionEnabled && !authUnlocked) {
       onAction?.({
         action: 'kill_by_port',
@@ -177,6 +197,44 @@ const PortControl = ({
     }
 
     setPendingPort(portInfo);
+    setPendingPreview(null);
+    try {
+      const preview = await previewPortMutation.mutateAsync({
+        port: portInfo.port,
+        pid: portInfo.pid,
+        protocol: portInfo.protocol,
+        localAddress: portInfo.local_address
+      });
+      setPendingPreview(preview);
+      if (!preview.allowed) {
+        onAction?.({
+          action: 'kill_by_port_preview',
+          status: 'blocked',
+          message: preview.message,
+          severity: 'warning',
+          entity_type: 'port',
+          entity_id: portInfo.port,
+          reason: preview.reason
+        });
+      }
+    } catch (error) {
+      const fallbackPreview = {
+        allowed: false,
+        message: error.message,
+        reason: error.payload?.reason || 'preview_failed',
+        target: { port: portInfo.port, pid: portInfo.pid }
+      };
+      setPendingPreview(fallbackPreview);
+      onAction?.({
+        action: 'kill_by_port_preview',
+        status: 'failed',
+        message: error.message,
+        severity: 'danger',
+        entity_type: 'port',
+        entity_id: portInfo.port,
+        retry_after: error.retryAfter ?? null
+      });
+    }
   };
 
   const confirmKill = async () => {
@@ -212,6 +270,7 @@ const PortControl = ({
       }
     } finally {
       setPendingPort(null);
+      setPendingPreview(null);
     }
   };
 
@@ -412,13 +471,18 @@ const PortControl = ({
         open={Boolean(pendingPort)}
         title={pendingPort ? `Stop port ${pendingPort.port}?` : 'Stop port'}
         description="DevControl can stop managed listeners and password-authorized current-user listeners."
-        details={pendingPort ? [
-          ...buildPortDetails(pendingPort)
-        ] : null}
-        confirmLabel={killPortMutation.isPending ? 'Stopping...' : 'Stop listener'}
+        details={pendingPort
+          ? pendingPreview
+            ? buildPortPreviewDetails(pendingPort, pendingPreview)
+            : buildPortDetails(pendingPort)
+          : null}
+        confirmLabel={previewPortMutation.isPending ? 'Previewing...' : killPortMutation.isPending ? 'Stopping...' : 'Stop listener'}
         onConfirm={() => { void confirmKill(); }}
-        onCancel={() => setPendingPort(null)}
-        disabled={killPortMutation.isPending}
+        onCancel={() => {
+          setPendingPort(null);
+          setPendingPreview(null);
+        }}
+        disabled={previewPortMutation.isPending || killPortMutation.isPending || pendingPreview?.allowed === false}
       />
     </section>
   );

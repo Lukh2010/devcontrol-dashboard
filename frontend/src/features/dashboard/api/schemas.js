@@ -160,6 +160,17 @@ export const apiMessageSchema = z.object({
   message: z.string()
 }).passthrough();
 
+export const stopPreviewSchema = z.object({
+  action: z.string(),
+  dry_run: z.boolean(),
+  allowed: z.boolean(),
+  reason: z.string().nullable().optional(),
+  message: z.string(),
+  target: z.record(z.any()).optional(),
+  policy: z.record(z.any()).optional(),
+  matches: z.array(z.record(z.any())).optional()
+}).passthrough();
+
 export const apiErrorSchema = z.object({
   error: z.string(),
   message: z.string().optional()

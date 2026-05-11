@@ -276,6 +276,38 @@ def test_current_user_process_can_be_killed_with_password(monkeypatch):
     assert response.get_json()["pid"] == 5555
 
 
+def test_process_stop_preview_does_not_terminate(monkeypatch):
+    client, headers = make_authenticated_client(monkeypatch)
+    monkeypatch.setattr("process_control_policy.is_dashboard_pid", lambda pid: False)
+    monkeypatch.setattr("process_control_policy.current_username", lambda: "desktop\\lukas")
+    terminated = {"called": False}
+
+    class FakeProcess:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def name(self):
+            return "RobloxPlayerBeta.exe"
+
+        def username(self):
+            return "DESKTOP\\lukas"
+
+        def terminate(self):
+            terminated["called"] = True
+
+    monkeypatch.setattr("services.action_executor_processes.psutil.Process", FakeProcess)
+
+    response = client.get("/api/processes/5555/stop-preview", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["dry_run"] is True
+    assert payload["allowed"] is True
+    assert payload["target"]["pid"] == 5555
+    assert payload["target"]["process_name"] == "RobloxPlayerBeta.exe"
+    assert terminated["called"] is False
+
+
 def test_current_user_process_requires_password_mode(monkeypatch):
     monkeypatch.delenv("DEVCONTROL_PASSWORD", raising=False)
     clear_security_state()
@@ -368,6 +400,61 @@ def test_current_user_port_listener_can_be_killed_with_password(monkeypatch):
 
     assert response.status_code == 200
     assert terminated["called"] is True
+
+
+def test_port_stop_preview_does_not_terminate(monkeypatch):
+    monkeypatch.setenv("DEVCONTROL_PASSWORD", "ci-password")
+    clear_security_state()
+    monkeypatch.setattr("process_control_policy.is_dashboard_pid", lambda pid: False)
+    monkeypatch.setattr("process_control_policy.current_username", lambda: "desktop\\lukas")
+    terminated = {"called": False}
+
+    class Runtime(FakeRuntime):
+        def __init__(self):
+            self.telemetry = FakeTelemetry()
+            self.actions = ActionExecutorService(
+                LiveUpdateHub(),
+                inventory_service=FakeInventoryService(ports=[
+                    {
+                        "port": 9000,
+                        "pid": 5555,
+                        "process_name": "RobloxPlayerBeta.exe",
+                        "protocol": "tcp",
+                        "local_address": "127.0.0.1",
+                    }
+                ]),
+            )
+            self.live_updates = FakeLiveUpdateHub()
+
+    class FakeProcess:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def name(self):
+            return "RobloxPlayerBeta.exe"
+
+        def username(self):
+            return "DESKTOP\\lukas"
+
+        def terminate(self):
+            terminated["called"] = True
+
+    monkeypatch.setattr("services.action_executor_processes.psutil.Process", FakeProcess)
+    app = create_app(Runtime())
+    client = app.test_client()
+
+    response = client.get(
+        "/api/port/9000/stop-preview?pid=5555&protocol=tcp&local_address=127.0.0.1",
+        headers={"X-DevControl-Password": "ci-password"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["dry_run"] is True
+    assert payload["allowed"] is True
+    assert payload["target"]["pid"] == 5555
+    assert payload["target"]["local_address"] == "127.0.0.1"
+    assert terminated["called"] is False
 
 
 def test_port_kill_returns_409_for_ambiguous_listener(monkeypatch):

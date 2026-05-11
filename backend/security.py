@@ -43,6 +43,10 @@ RATE_LIMIT_POLICIES = {
         "limit": 10,
         "window_seconds": 60,
     },
+    "stop_preview": {
+        "limit": 30,
+        "window_seconds": 60,
+    },
     "terminal_handshake": {
         "limit": 6,
         "window_seconds": 60,

@@ -10,6 +10,7 @@ import {
   performanceSnapshotSchema,
   portsSchema,
   processesSchema,
+  stopPreviewSchema,
   systemAdminSchema,
   systemInfoSchema
 } from './schemas';
@@ -203,6 +204,20 @@ export function killPort({ port, controlPassword, pid, protocol, localAddress })
   }, apiMessageSchema);
 }
 
+export function previewPortStop({ port, controlPassword, pid, protocol, localAddress }) {
+  const query = buildSearchParams({
+    pid,
+    protocol,
+    local_address: localAddress
+  });
+  return mutateJson(`/api/port/${port}/stop-preview${query}`, {
+    method: 'GET',
+    headers: {
+      'X-DevControl-Password': controlPassword || ''
+    }
+  }, stopPreviewSchema);
+}
+
 export function killProcess({ pid, controlPassword }) {
   return mutateJson(`/api/processes/${pid}/kill`, {
     method: 'POST',
@@ -215,4 +230,13 @@ export function killProcess({ pid, controlPassword }) {
     pid: processesSchema.element.shape.pid.optional(),
     name: processesSchema.element.shape.name.optional()
   }));
+}
+
+export function previewProcessStop({ pid, controlPassword }) {
+  return mutateJson(`/api/processes/${pid}/stop-preview`, {
+    method: 'GET',
+    headers: {
+      'X-DevControl-Password': controlPassword || ''
+    }
+  }, stopPreviewSchema);
 }

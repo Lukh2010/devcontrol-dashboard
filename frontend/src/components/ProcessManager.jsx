@@ -1,7 +1,7 @@
 import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronRight, Cpu, RefreshCw, Search, Shield, Trash2 } from 'lucide-react';
 
-import { useKillProcessMutation } from '../features/dashboard/hooks/useActionMutations';
+import { useKillProcessMutation, usePreviewProcessStopMutation } from '../features/dashboard/hooks/useActionMutations';
 import {
   buildVisibleProcessTree,
   collectExpandableProcessIds,
@@ -164,6 +164,22 @@ function buildProcessDetails(process) {
   ].filter(Boolean);
 }
 
+function buildProcessPreviewDetails(process, preview) {
+  const target = preview?.target || {};
+  const details = [
+    `PID: ${target.pid ?? process?.pid}`,
+    `Owner scope: ${target.owner_scope || process?.owner_scope || 'unknown'}`,
+    target.username ? `User: ${target.username}` : process?.username ? `User: ${process.username}` : null,
+    `Preview: ${preview?.message || 'Checking stop policy...'}`,
+    preview?.reason ? `Reason: ${preview.reason}` : null,
+    preview?.allowed === false ? 'This stop is blocked by the current policy.' : null,
+    preview?.allowed === true ? 'This stop target was verified by the backend dry run.' : null,
+    process?.sensitive_masked ? 'Sensitive process details are locked until control access is unlocked.' : (process?.command_line || process?.exe_path || null)
+  ];
+
+  return details.filter(Boolean);
+}
+
 const ProcessManager = ({
   processes,
   loading,
@@ -181,10 +197,12 @@ const ProcessManager = ({
   const [killableOnly, setKillableOnly] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [pendingProcess, setPendingProcess] = useState(null);
+  const [pendingPreview, setPendingPreview] = useState(null);
   const [expandedProcessIds, setExpandedProcessIds] = useState(() => new Set());
 
   const deferredSearch = useDeferredValue(search);
   const killProcessMutation = useKillProcessMutation('');
+  const previewProcessMutation = usePreviewProcessStopMutation('');
   const allProcesses = useMemo(() => processes ?? [], [processes]);
 
   const matchesLocalFilters = useMemo(() => {
@@ -277,7 +295,7 @@ const ProcessManager = ({
     });
   };
 
-  const requestKill = (process) => {
+  const requestKill = async (process) => {
     if (passwordProtectionEnabled && !authUnlocked) {
       onAction?.({
         action: 'kill_process',
@@ -292,6 +310,39 @@ const ProcessManager = ({
     }
 
     setPendingProcess(process);
+    setPendingPreview(null);
+    try {
+      const preview = await previewProcessMutation.mutateAsync(process.pid);
+      setPendingPreview(preview);
+      if (!preview.allowed) {
+        onAction?.({
+          action: 'kill_process_preview',
+          status: 'blocked',
+          message: preview.message,
+          severity: 'warning',
+          entity_type: 'process',
+          entity_id: process.pid,
+          reason: preview.reason
+        });
+      }
+    } catch (error) {
+      const fallbackPreview = {
+        allowed: false,
+        message: error.message,
+        reason: error.payload?.reason || 'preview_failed',
+        target: { pid: process.pid }
+      };
+      setPendingPreview(fallbackPreview);
+      onAction?.({
+        action: 'kill_process_preview',
+        status: 'failed',
+        message: error.message,
+        severity: 'danger',
+        entity_type: 'process',
+        entity_id: process.pid,
+        retry_after: error.retryAfter ?? null
+      });
+    }
   };
 
   const confirmKill = async () => {
@@ -316,6 +367,7 @@ const ProcessManager = ({
       }
     } finally {
       setPendingProcess(null);
+      setPendingPreview(null);
     }
   };
 
@@ -623,11 +675,18 @@ const ProcessManager = ({
         open={Boolean(pendingProcess)}
         title={pendingProcess ? `Stop ${pendingProcess.name}?` : 'Stop process'}
         description="DevControl can stop managed processes and password-authorized current-user processes."
-        details={pendingProcess ? buildProcessDetails(pendingProcess) : null}
-        confirmLabel={killProcessMutation.isPending ? 'Stopping...' : 'Stop process'}
+        details={pendingProcess
+          ? pendingPreview
+            ? buildProcessPreviewDetails(pendingProcess, pendingPreview)
+            : buildProcessDetails(pendingProcess)
+          : null}
+        confirmLabel={previewProcessMutation.isPending ? 'Previewing...' : killProcessMutation.isPending ? 'Stopping...' : 'Stop process'}
         onConfirm={() => { void confirmKill(); }}
-        onCancel={() => setPendingProcess(null)}
-        disabled={killProcessMutation.isPending}
+        onCancel={() => {
+          setPendingProcess(null);
+          setPendingPreview(null);
+        }}
+        disabled={previewProcessMutation.isPending || killProcessMutation.isPending || pendingPreview?.allowed === false}
       />
     </section>
   );

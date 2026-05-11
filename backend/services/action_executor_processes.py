@@ -11,6 +11,159 @@ from security import has_current_request_control_authorization
 class ActionExecutorProcessMixin:
     """Handles process and port control actions."""
 
+    def preview_process_stop(self, pid: int, is_admin: bool):
+        """Describe the exact process stop target without terminating it."""
+        try:
+            process = psutil.Process(pid)
+            process_name = process.name()
+            process_username = self._safe_process_username(process)
+            control_policy = self._resolve_control_policy(pid, is_admin, process_username)
+            allowed = bool(control_policy.get("killable"))
+            reason = control_policy.get("block_reason")
+            message = (
+                f"Process {pid} ({process_name}) can be stopped."
+                if allowed
+                else control_policy.get("kill_reason") or f"Process {pid} cannot be stopped."
+            )
+            return {
+                "action": "kill_process",
+                "dry_run": True,
+                "allowed": allowed,
+                "reason": reason,
+                "message": message,
+                "target": {
+                    "pid": pid,
+                    "process_name": process_name,
+                    "owner_scope": control_policy.get("owner_scope"),
+                    "username": process_username,
+                },
+                "policy": control_policy,
+            }, 200
+        except psutil.NoSuchProcess:
+            return {
+                "action": "kill_process",
+                "dry_run": True,
+                "allowed": False,
+                "reason": "process_not_found",
+                "message": f"Process {pid} was not found.",
+                "target": {"pid": pid},
+            }, 200
+        except psutil.AccessDenied:
+            return {
+                "action": "kill_process",
+                "dry_run": True,
+                "allowed": False,
+                "reason": "access_denied",
+                "message": f"Access denied while inspecting process {pid}.",
+                "target": {"pid": pid},
+            }, 200
+
+    def preview_port_stop(
+        self,
+        port: int,
+        is_admin: bool = False,
+        expected_pid: int | None = None,
+        expected_protocol: str | None = None,
+        expected_local_address: str | None = None,
+    ):
+        """Describe the exact port listener stop target without terminating it."""
+        listeners = self._find_listeners_by_port(
+            port,
+            expected_pid=expected_pid,
+            expected_protocol=expected_protocol,
+            expected_local_address=expected_local_address,
+        )
+        if len(listeners) > 1:
+            return {
+                "action": "kill_by_port",
+                "dry_run": True,
+                "allowed": False,
+                "reason": "ambiguous_listener",
+                "message": f"Multiple listeners match port {port}. Select a specific PID or local address.",
+                "target": {"port": port},
+                "matches": listeners,
+            }, 200
+
+        listener = listeners[0] if listeners else None
+        if listener is None:
+            return {
+                "action": "kill_by_port",
+                "dry_run": True,
+                "allowed": False,
+                "reason": "port_not_found",
+                "message": f"No process found listening on port {port}.",
+                "target": {"port": port},
+            }, 200
+
+        pid = listener["pid"]
+        if not pid:
+            return {
+                "action": "kill_by_port",
+                "dry_run": True,
+                "allowed": False,
+                "reason": "protected_process",
+                "message": f"Port {port} has no process PID to terminate.",
+                "target": listener,
+            }, 200
+
+        try:
+            process = psutil.Process(pid)
+            process_name = process.name()
+            process_username = self._safe_process_username(process)
+            control_policy = self._resolve_control_policy(pid, is_admin, process_username)
+            allowed = bool(control_policy.get("killable"))
+            reason = control_policy.get("block_reason")
+            message = (
+                f"Listener {process_name} on port {port} can be stopped."
+                if allowed
+                else control_policy.get("kill_reason") or f"Listener on port {port} cannot be stopped."
+            )
+            return {
+                "action": "kill_by_port",
+                "dry_run": True,
+                "allowed": allowed,
+                "reason": reason,
+                "message": message,
+                "target": {
+                    **listener,
+                    "pid": pid,
+                    "process_name": process_name,
+                    "owner_scope": control_policy.get("owner_scope"),
+                    "username": process_username,
+                },
+                "policy": control_policy,
+            }, 200
+        except psutil.NoSuchProcess:
+            return {
+                "action": "kill_by_port",
+                "dry_run": True,
+                "allowed": False,
+                "reason": "process_not_found",
+                "message": f"Cannot find the process on port {port}.",
+                "target": listener,
+            }, 200
+        except psutil.AccessDenied:
+            return {
+                "action": "kill_by_port",
+                "dry_run": True,
+                "allowed": False,
+                "reason": "access_denied",
+                "message": f"Cannot inspect the process on port {port}.",
+                "target": listener,
+            }, 200
+
+    def _resolve_control_policy(self, pid: int, is_admin: bool, username: str | None) -> dict:
+        """Resolve stop policy and apply current request authorization state."""
+        control_policy = describe_process_control(pid, is_admin=is_admin, username=username)
+        if control_policy["external_killable"] and not has_current_request_control_authorization():
+            return {
+                **control_policy,
+                "killable": False,
+                "kill_reason": "Valid control password session required",
+                "block_reason": "password_mode_required",
+            }
+        return control_policy
+
     def kill_process_by_port(
         self,
         port: int,
@@ -64,14 +217,7 @@ class ActionExecutorProcessMixin:
                 process = psutil.Process(pid)
                 process_name = process.name()
                 process_username = self._safe_process_username(process)
-                control_policy = describe_process_control(pid, is_admin=is_admin, username=process_username)
-                if control_policy["external_killable"] and not has_current_request_control_authorization():
-                    control_policy = {
-                        **control_policy,
-                        "killable": False,
-                        "kill_reason": "Valid control password session required",
-                        "block_reason": "password_mode_required",
-                    }
+                control_policy = self._resolve_control_policy(pid, is_admin, process_username)
 
                 if not control_policy["killable"]:
                     reason = control_policy.get("block_reason") or "not_current_user_process"
@@ -318,14 +464,7 @@ class ActionExecutorProcessMixin:
             )
             return {"error": f"Access denied to process {pid}", "reason": "access_denied"}, 403
 
-        control_policy = describe_process_control(pid, is_admin=is_admin, username=process_username)
-        if control_policy["external_killable"] and not has_current_request_control_authorization():
-            control_policy = {
-                **control_policy,
-                "killable": False,
-                "kill_reason": "Valid control password session required",
-                "block_reason": "password_mode_required",
-            }
+        control_policy = self._resolve_control_policy(pid, is_admin, process_username)
 
         if not control_policy["killable"]:
             reason = control_policy.get("block_reason") or "not_current_user_process"

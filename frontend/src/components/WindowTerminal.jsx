@@ -4,6 +4,18 @@ import { AnimatePresence, motion } from 'motion/react';
 
 import { useTerminalSession } from '../features/dashboard/hooks/useTerminalSession';
 
+function formatAuditTime(timestamp) {
+  if (!timestamp) {
+    return 'Pending';
+  }
+
+  return new Date(timestamp).toLocaleTimeString('de-DE', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+}
+
 const WindowTerminal = ({
   authUnlocked,
   passwordProtectionEnabled,
@@ -206,16 +218,39 @@ const WindowTerminal = ({
 
         {history.length ? (
           <div className="history-panel mini-card">
-            <div className="action-feed-title">Recent commands</div>
-            <div className="history-list">
-              {[...history].reverse().slice(0, 5).map((entry) => (
-                <div key={`${entry.command}-${entry.timestamp}`} className="history-item">
-                  <button className="ghost-button history-command" type="button" onClick={() => setCurrentCommand(entry.command)}>
-                    {entry.command}
-                  </button>
-                  <button className="ghost-button history-copy" type="button" onClick={() => { void copyLine(entry.command); }}>
-                    <Copy size={14} />
-                  </button>
+            <div className="history-header">
+              <div>
+                <div className="action-feed-title">Terminal audit</div>
+                <div className="muted-note">Last commands with classification, result and block reason.</div>
+              </div>
+              <span className="status-badge status-neutral">{history.length} tracked</span>
+            </div>
+            <div className="terminal-audit-list">
+              {[...history].reverse().map((entry) => (
+                <div key={`${entry.command}-${entry.timestamp}`} className="terminal-audit-item">
+                  <div className="terminal-audit-main">
+                    <button className="ghost-button history-command" type="button" onClick={() => setCurrentCommand(entry.command)}>
+                      {entry.command}
+                    </button>
+                    <button className="ghost-button history-copy" type="button" onClick={() => { void copyLine(entry.command); }}>
+                      <Copy size={14} />
+                    </button>
+                  </div>
+                  <div className="terminal-audit-meta">
+                    <span className={`status-pill ${entry.success === false ? 'warn' : entry.success === true ? 'good' : 'neutral'}`}>
+                      {entry.status || 'queued'}
+                    </span>
+                    <span className="status-pill neutral">{entry.classification || 'unknown'}</span>
+                    <span className="muted-note">
+                      {entry.return_code == null ? 'Return code pending' : `Return code ${entry.return_code}`}
+                    </span>
+                    <span className="muted-note">{formatAuditTime(entry.completed_at || entry.timestamp)}</span>
+                  </div>
+                  {(entry.reason || entry.message || entry.timed_out) ? (
+                    <div className="muted-note wrap-text">
+                      {entry.timed_out ? 'Timeout' : entry.reason || entry.message}
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>

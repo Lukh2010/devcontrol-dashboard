@@ -1,6 +1,12 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { dashboardQueryKeys, killPort, killProcess } from '../api/client';
+import {
+  dashboardQueryKeys,
+  killPort,
+  killProcess,
+  previewPortStop,
+  previewProcessStop
+} from '../api/client';
 
 export function useKillPortMutation(controlPassword) {
   const queryClient = useQueryClient();
@@ -24,5 +30,20 @@ export function useKillProcessMutation(controlPassword) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.processes });
     }
+  });
+}
+
+export function usePreviewPortStopMutation(controlPassword) {
+  return useMutation({
+    mutationFn: (portRequest) => {
+      const request = typeof portRequest === 'object' ? portRequest : { port: portRequest };
+      return previewPortStop({ ...request, controlPassword });
+    }
+  });
+}
+
+export function usePreviewProcessStopMutation(controlPassword) {
+  return useMutation({
+    mutationFn: (pid) => previewProcessStop({ pid, controlPassword })
   });
 }
