@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 const MAX_HISTORY = 50;
+const TERMINAL_PORT = 8003;
 
 const EMPTY_COMMAND_SAFETY = {
   command: '',
@@ -19,6 +20,13 @@ function formatRelativeRetry(retryUntil) {
 
   const deltaMs = retryUntil - Date.now();
   return deltaMs > 0 ? Math.ceil(deltaMs / 1000) : 0;
+}
+
+function resolveTerminalHost() {
+  const { hostname } = window.location;
+  return hostname === 'localhost' || hostname === '127.0.0.1'
+    ? hostname
+    : '127.0.0.1';
 }
 
 export function useTerminalSession({
@@ -210,6 +218,22 @@ export function useTerminalSession({
       case 'confirm_command_cancelled':
         addOutput({ type: 'warning', text: message.message });
         break;
+      case 'command_result':
+        setHistory((prev) => prev.map((entry, index) => (
+          index === prev.length - 1 && entry.command === message.command
+            ? {
+              ...entry,
+              classification: message.classification,
+              return_code: message.return_code,
+              success: message.success
+            }
+            : entry
+        )));
+        addOutput({
+          type: message.success ? 'system' : 'warning',
+          text: `Command exited with code ${message.return_code}`
+        });
+        break;
       case 'error':
         if (message.reason === 'rate_limited') {
           const retryAt = Date.now() + ((message.retry_after || 1) * 1000);
@@ -217,6 +241,14 @@ export function useTerminalSession({
           setRetryUntil(retryAt);
           setConnectionState('rate_limited');
           setConnectionMessage(`Rate limited. Retry in about ${message.retry_after}s.`);
+          break;
+        }
+
+        if (message.reason === 'session_limit') {
+          setConnected(false);
+          setConnectionState('session_limit');
+          setConnectionMessage(message.message || 'Terminal session limit reached.');
+          addOutput({ type: 'warning', text: message.message });
           break;
         }
 
@@ -255,7 +287,7 @@ export function useTerminalSession({
 
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const websocket = new WebSocket(`${protocol}://${window.location.hostname}:8003`);
+      const websocket = new WebSocket(`${protocol}://${resolveTerminalHost()}:${TERMINAL_PORT}`);
 
       websocket.onopen = () => {
         intentionalCloseRef.current = false;
@@ -390,8 +422,13 @@ export function useTerminalSession({
     closeSocket();
     setConnectionState('reconnecting');
     setConnectionMessage('Manual reconnect requested.');
+    if (passwordProtectionEnabled && !authUnlocked) {
+      setConnectionState('locked');
+      setConnectionMessage('Unlock control access to start the protected terminal session.');
+      return;
+    }
     connectWebSocket();
-  }, [closeSocket, connectWebSocket]);
+  }, [authUnlocked, closeSocket, connectWebSocket, passwordProtectionEnabled]);
 
   const handleKeyDown = useCallback((event) => {
     if (event.key === 'Enter') {

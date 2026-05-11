@@ -57,6 +57,8 @@ pids
 *.pid
 *.seed
 *.pid.lock
+.devcontrol-runtime/
+.devcontrol-logs/
 
 # Coverage directory used by tools like istanbul
 coverage/

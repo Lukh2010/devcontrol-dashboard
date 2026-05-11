@@ -1,11 +1,14 @@
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 import psutil
 
 
-PID_FILE = Path.home() / ".devcontrol_pids.json"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+RUNTIME_DIR = Path(os.environ.get("DEVCONTROL_RUNTIME_DIR", PROJECT_ROOT / ".devcontrol-runtime"))
+PID_FILE = RUNTIME_DIR / "pids.json"
 TRUSTED_PID_GROUPS = ("backend", "frontend")
 
 
@@ -81,8 +84,11 @@ def load_dashboard_pids():
 def save_dashboard_pids(pids):
     """Persist dashboard-managed PIDs to the shared PID file."""
     try:
-        with open(PID_FILE, "w", encoding="utf-8") as file_handle:
+        PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temp_file = PID_FILE.with_suffix(".tmp")
+        with open(temp_file, "w", encoding="utf-8") as file_handle:
             json.dump(pids, file_handle, indent=2)
+        temp_file.replace(PID_FILE)
     except Exception as exc:
         print(f"Warning: could not write PID file {PID_FILE}: {exc}")
 
@@ -138,3 +144,25 @@ def is_dashboard_pid(pid: int) -> bool:
                 return True
 
     return False
+
+
+def get_pid_file_status() -> dict[str, Any]:
+    """Return runtime PID-file health metadata for diagnostics."""
+    writable = False
+    error = None
+    try:
+        PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+        probe_file = PID_FILE.parent / ".write-test"
+        with open(probe_file, "w", encoding="utf-8") as file_handle:
+            file_handle.write("ok")
+        probe_file.unlink(missing_ok=True)
+        writable = True
+    except Exception as exc:
+        error = str(exc)
+
+    return {
+        "path": str(PID_FILE),
+        "exists": PID_FILE.exists(),
+        "writable": writable,
+        "error": error,
+    }

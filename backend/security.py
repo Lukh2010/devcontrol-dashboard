@@ -53,6 +53,11 @@ RATE_LIMIT_POLICIES = {
 }
 
 
+def trust_proxy_headers() -> bool:
+    """Return whether forwarded client IP headers should be trusted."""
+    return os.environ.get("DEVCONTROL_TRUST_PROXY_HEADERS", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _now() -> float:
     return time.time()
 
@@ -77,7 +82,7 @@ def get_client_ip(explicit_ip: str | None = None) -> str:
         return explicit_ip
 
     forwarded_for = request.headers.get("X-Forwarded-For", "").strip()
-    if forwarded_for:
+    if forwarded_for and trust_proxy_headers():
         return forwarded_for.split(",")[0].strip()
 
     return request.remote_addr or "unknown"
@@ -140,6 +145,13 @@ def clear_failed_attempts(action: str, client_ip: str | None = None):
     key = _state_key(action, resolved_ip)
     FAILED_AUTH_STATE.pop(key, None)
     LOCKOUT_STATE.pop(key, None)
+
+
+def clear_rate_limit(action: str, client_ip: str | None = None):
+    """Clear consumed rate-limit entries after a trusted recovery action."""
+    resolved_ip = get_client_ip(client_ip)
+    key = _state_key(action, resolved_ip)
+    RATE_LIMIT_STATE.pop(key, None)
 
 
 def make_rate_limit_response(retry_after: int, message: str = RATE_LIMITED_MESSAGE):

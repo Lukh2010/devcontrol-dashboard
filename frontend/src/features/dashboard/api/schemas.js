@@ -29,6 +29,32 @@ export const systemAdminSchema = z.object({
   platform: z.string()
 });
 
+export const healthSchema = z.object({
+  api: z.object({
+    host: z.string(),
+    port: z.number(),
+    ready: z.boolean()
+  }).optional(),
+  terminal: z.object({
+    host: z.string(),
+    port: z.number(),
+    thread_alive: z.boolean(),
+    session_count: z.number(),
+    max_sessions: z.number()
+  }).optional(),
+  pid_file: z.object({
+    path: z.string(),
+    exists: z.boolean(),
+    writable: z.boolean(),
+    error: z.string().nullable().optional()
+  }).optional(),
+  password: z.object({
+    enabled: z.boolean(),
+    session_active: z.boolean()
+  }).optional(),
+  admin: z.boolean().optional()
+}).passthrough();
+
 export const systemInfoSchema = z.object({
   platform: z.string(),
   platform_release: z.string(),
@@ -77,7 +103,8 @@ export const portSchema = z.object({
   external_killable: z.boolean().optional(),
   killable: z.boolean().optional(),
   block_reason: z.string().nullable().optional(),
-  kill_reason: z.string().nullable().optional()
+  kill_reason: z.string().nullable().optional(),
+  sensitive_masked: z.boolean().optional()
 });
 
 export const processSchema = z.object({
@@ -98,7 +125,8 @@ export const processSchema = z.object({
   external_killable: z.boolean().optional(),
   killable: z.boolean().optional(),
   block_reason: z.string().nullable().optional(),
-  kill_reason: z.string().nullable().optional()
+  kill_reason: z.string().nullable().optional(),
+  sensitive_masked: z.boolean().optional()
 });
 
 export const networkAddressSchema = z.object({
@@ -111,7 +139,8 @@ export const networkAddressSchema = z.object({
 export const networkInfoSchema = z.object({
   interfaces: z.record(z.array(networkAddressSchema)),
   default_gateway: z.string(),
-  hostname: z.string()
+  hostname: z.string(),
+  sensitive_masked: z.boolean().optional()
 });
 
 export const actionEventSchema = z.object({
@@ -129,7 +158,7 @@ export const actionEventSchema = z.object({
 
 export const apiMessageSchema = z.object({
   message: z.string()
-});
+}).passthrough();
 
 export const apiErrorSchema = z.object({
   error: z.string(),

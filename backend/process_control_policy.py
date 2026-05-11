@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import getpass
 import os
+import platform
 
 import psutil
 
@@ -15,7 +16,7 @@ PROTECTED_PIDS = {0, 4}
 
 
 def normalize_username(username: str | None) -> str | None:
-    """Normalize OS usernames for same-user comparisons."""
+    """Normalize OS usernames without dropping domain or UPN scope."""
     if not username:
         return None
 
@@ -23,16 +24,32 @@ def normalize_username(username: str | None) -> str | None:
     if not normalized:
         return None
 
-    if "\\" in normalized:
-        normalized = normalized.rsplit("\\", 1)[-1]
-    if "@" in normalized:
-        normalized = normalized.split("@", 1)[0]
     return normalized or None
+
+
+def _is_scoped_username(username: str | None) -> bool:
+    return bool(username and ("\\" in username or "@" in username))
+
+
+def _short_username(username: str | None) -> str | None:
+    normalized = normalize_username(username)
+    if not normalized:
+        return None
+    if "\\" in normalized:
+        return normalized.rsplit("\\", 1)[-1]
+    if "@" in normalized:
+        return normalized.split("@", 1)[0]
+    return normalized
 
 
 def current_username() -> str | None:
     """Return the user running the dashboard backend."""
     try:
+        if platform.system() == "Windows":
+            user_domain = os.environ.get("USERDOMAIN", "").strip()
+            username = os.environ.get("USERNAME", "").strip()
+            if user_domain and username:
+                return normalize_username(f"{user_domain}\\{username}")
         return normalize_username(getpass.getuser())
     except Exception:
         return None
@@ -47,7 +64,15 @@ def is_current_user_process(pid: int, username: str | None = None) -> bool:
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
             return False
 
-    return normalize_username(resolved_username) == current_username()
+    normalized_process_user = normalize_username(resolved_username)
+    normalized_current_user = current_username()
+    if normalized_process_user == normalized_current_user:
+        return True
+
+    if not _is_scoped_username(normalized_process_user) and not _is_scoped_username(normalized_current_user):
+        return _short_username(normalized_process_user) == _short_username(normalized_current_user)
+
+    return False
 
 
 def describe_process_control(pid: int, is_admin: bool, username: str | None = None) -> dict:

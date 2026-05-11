@@ -6,7 +6,10 @@ export function useKillPortMutation(controlPassword) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (port) => killPort({ port, controlPassword }),
+    mutationFn: (portRequest) => {
+      const request = typeof portRequest === 'object' ? portRequest : { port: portRequest };
+      return killPort({ ...request, controlPassword });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.ports });
     }

@@ -228,6 +228,9 @@ def test_kill_process_by_port_uses_inventory_lookup(monkeypatch):
         def terminate(self):
             terminated["called"] = True
 
+        def wait(self, timeout=None):
+            return 0
+
     monkeypatch.setattr("services.action_executor_processes.psutil.Process", lambda pid: FakeProcess())
 
     service = ActionExecutorService(
@@ -235,7 +238,7 @@ def test_kill_process_by_port_uses_inventory_lookup(monkeypatch):
         inventory_service=FakeInventoryService(ports=[{"port": 8000, "pid": 4321, "process_name": "dashboard-api.exe"}]),
     )
 
-    payload, status = service.kill_process_by_port(8000)
+    payload, status = service.kill_process_by_port(8000, is_admin=True)
 
     assert status == 200
     assert terminated["called"] is True
@@ -245,7 +248,7 @@ def test_kill_process_by_port_uses_inventory_lookup(monkeypatch):
 def test_current_user_process_can_be_killed_with_password(monkeypatch):
     client, headers = make_authenticated_client(monkeypatch)
     monkeypatch.setattr("process_control_policy.is_dashboard_pid", lambda pid: False)
-    monkeypatch.setattr("process_control_policy.current_username", lambda: "lukas")
+    monkeypatch.setattr("process_control_policy.current_username", lambda: "desktop\\lukas")
     terminated = {"called": False}
 
     class FakeProcess:
@@ -279,7 +282,7 @@ def test_current_user_process_requires_password_mode(monkeypatch):
     app = create_app(FakeRuntime())
     client = app.test_client()
     monkeypatch.setattr("process_control_policy.is_dashboard_pid", lambda pid: False)
-    monkeypatch.setattr("process_control_policy.current_username", lambda: "lukas")
+    monkeypatch.setattr("process_control_policy.current_username", lambda: "desktop\\lukas")
 
     class FakeProcess:
         def __init__(self, pid):
@@ -302,7 +305,7 @@ def test_current_user_process_requires_password_mode(monkeypatch):
 def test_other_user_process_is_blocked_even_with_password(monkeypatch):
     client, headers = make_authenticated_client(monkeypatch)
     monkeypatch.setattr("process_control_policy.is_dashboard_pid", lambda pid: False)
-    monkeypatch.setattr("process_control_policy.current_username", lambda: "lukas")
+    monkeypatch.setattr("process_control_policy.current_username", lambda: "desktop\\lukas")
 
     class FakeProcess:
         def __init__(self, pid):
@@ -326,7 +329,7 @@ def test_current_user_port_listener_can_be_killed_with_password(monkeypatch):
     monkeypatch.setenv("DEVCONTROL_PASSWORD", "ci-password")
     clear_security_state()
     monkeypatch.setattr("process_control_policy.is_dashboard_pid", lambda pid: False)
-    monkeypatch.setattr("process_control_policy.current_username", lambda: "lukas")
+    monkeypatch.setattr("process_control_policy.current_username", lambda: "desktop\\lukas")
     terminated = {"called": False}
 
     class Runtime(FakeRuntime):
@@ -353,7 +356,11 @@ def test_current_user_port_listener_can_be_killed_with_password(monkeypatch):
         def terminate(self):
             terminated["called"] = True
 
+        def wait(self, timeout=None):
+            return 0
+
     monkeypatch.setattr("services.action_executor_processes.psutil.Process", FakeProcess)
+    monkeypatch.setattr("services.action_executor_processes.psutil.net_connections", lambda: [])
     app = create_app(Runtime())
     client = app.test_client()
 
@@ -361,3 +368,28 @@ def test_current_user_port_listener_can_be_killed_with_password(monkeypatch):
 
     assert response.status_code == 200
     assert terminated["called"] is True
+
+
+def test_port_kill_returns_409_for_ambiguous_listener(monkeypatch):
+    monkeypatch.setenv("DEVCONTROL_PASSWORD", "ci-password")
+    clear_security_state()
+
+    class Runtime(FakeRuntime):
+        def __init__(self):
+            self.telemetry = FakeTelemetry()
+            self.actions = ActionExecutorService(
+                LiveUpdateHub(),
+                inventory_service=FakeInventoryService(ports=[
+                    {"port": 9000, "pid": 1111, "process_name": "first.exe", "local_address": "127.0.0.1"},
+                    {"port": 9000, "pid": 2222, "process_name": "second.exe", "local_address": "::1"},
+                ]),
+            )
+            self.live_updates = FakeLiveUpdateHub()
+
+    app = create_app(Runtime())
+    client = app.test_client()
+
+    response = client.delete("/api/port/9000", headers={"X-DevControl-Password": "ci-password"})
+
+    assert response.status_code == 409
+    assert response.get_json()["reason"] == "ambiguous_listener"

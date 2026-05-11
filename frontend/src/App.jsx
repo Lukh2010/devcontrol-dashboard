@@ -134,6 +134,7 @@ function AppContent() {
     processes,
     ports,
     networkInfo,
+    health,
     processesLoading,
     processesFetching,
     processesUpdatedAt,
@@ -295,10 +296,12 @@ function AppContent() {
     },
     {
       label: 'Terminal',
-      badgeTone: terminalReadiness.tone,
-      badgeLabel: terminalReadiness.label,
-      summary: terminalReadiness.summary,
-      hint: terminalReadiness.hint
+      badgeTone: health?.terminal?.thread_alive ? terminalReadiness.tone : 'status-warning',
+      badgeLabel: health?.terminal?.thread_alive ? terminalReadiness.label : 'Starting',
+      summary: health?.terminal?.thread_alive ? terminalReadiness.summary : 'Waiting for terminal gateway.',
+      hint: health?.terminal
+        ? `${health.terminal.host}:${health.terminal.port} | ${health.terminal.session_count}/${health.terminal.max_sessions} sessions`
+        : terminalReadiness.hint
     },
     {
       label: 'Auth',
@@ -313,6 +316,13 @@ function AppContent() {
       badgeLabel: isAdmin ? 'Available' : 'Limited',
       summary: isAdmin ? 'Windows admin actions are available.' : 'Process termination may be blocked.',
       hint: 'Only dashboard-owned processes and ports remain killable.'
+    },
+    {
+      label: 'PID tracking',
+      badgeTone: health?.pid_file?.writable ? 'status-success' : 'status-danger',
+      badgeLabel: health?.pid_file?.writable ? 'Writable' : 'Blocked',
+      summary: health?.pid_file?.exists ? 'Dashboard process registry exists.' : 'Dashboard process registry is ready.',
+      hint: health?.pid_file?.error || health?.pid_file?.path || 'Runtime PID file status is loading.'
     }
   ];
 
@@ -392,7 +402,8 @@ function AppContent() {
     performanceData,
     processes,
     ports,
-    networkInfo
+    networkInfo,
+    health
   };
 
   const renderContent = () => {

@@ -17,6 +17,7 @@ from security import (
     has_valid_control_session,
     is_password_protection_enabled,
     register_failed_attempt,
+    trust_proxy_headers,
     verify_control_password
 )
 from terminal_session import TerminalSessionManager
@@ -25,10 +26,11 @@ from terminal_session import TerminalSessionManager
 class TerminalGatewayService:
     """Owns terminal websocket lifecycle and session routing."""
 
-    def __init__(self, live_updates, host: str = "127.0.0.1", port: int = 8003):
+    def __init__(self, live_updates, host: str = "127.0.0.1", port: int = 8003, max_sessions: int = 3):
         self.live_updates = live_updates
         self.host = host
         self.port = port
+        self.max_sessions = max(1, int(max_sessions))
         self.terminal_manager = TerminalSessionManager()
         self._thread = None
         self._thread_lock = threading.Lock()
@@ -94,6 +96,23 @@ class TerminalGatewayService:
                 return
 
             clear_failed_attempts("terminal_handshake", client_ip)
+            if self.terminal_manager.get_session_count() >= self.max_sessions:
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "message": "Terminal session limit reached. Close an existing terminal before opening another.",
+                    "reason": "session_limit",
+                    "requires_password": password_enabled,
+                }))
+                self._publish_terminal_state(
+                    "session_limit",
+                    message="Terminal session limit reached",
+                    severity="warning",
+                    reason="session_limit",
+                    requires_password=password_enabled,
+                )
+                await websocket.close(code=4429, reason="Session limit")
+                return
+
             session_id = await self.terminal_manager.create_session(websocket)
             self._publish_terminal_state(
                 "connected",
@@ -222,9 +241,19 @@ class TerminalGatewayService:
 
     def _get_client_ip(self, websocket) -> str:
         forwarded_for = websocket.request_headers.get("X-Forwarded-For", "").strip()
-        if forwarded_for:
+        if forwarded_for and trust_proxy_headers():
             return forwarded_for.split(",")[0].strip()
         remote_address = getattr(websocket, "remote_address", None)
         if isinstance(remote_address, tuple) and remote_address:
             return str(remote_address[0])
         return "unknown"
+
+    def get_status(self) -> dict:
+        """Return terminal gateway runtime health metadata."""
+        return {
+            "host": self.host,
+            "port": self.port,
+            "thread_alive": bool(self._thread and self._thread.is_alive()),
+            "session_count": self.terminal_manager.get_session_count(),
+            "max_sessions": self.max_sessions,
+        }

@@ -99,7 +99,26 @@ function getStopReason(portInfo, authUnlocked, passwordProtectionEnabled) {
     return 'Unlock control access before stopping this listener';
   }
 
-  return portInfo.kill_reason || `Stop listener on port ${portInfo.port}`;
+  if (portInfo.block_reason === 'ambiguous_listener') {
+    return 'Select a specific listener before stopping this port';
+  }
+
+  return portInfo.kill_reason || portInfo.block_reason || `Stop listener on port ${portInfo.port}`;
+}
+
+function buildPortDetails(portInfo) {
+  if (!portInfo) {
+    return null;
+  }
+
+  return [
+    `${portInfo.process_name} | PID ${portInfo.pid}`,
+    `Port: ${portInfo.local_address || 'unknown host'}:${portInfo.port}`,
+    `Protocol: ${portInfo.protocol || 'tcp'} | State: ${portInfo.state || portInfo.status}`,
+    `Owner scope: ${portInfo.owner_scope || 'unknown'}`,
+    portInfo.sensitive_masked ? 'Sensitive listener details are locked until control access is unlocked.' : (portInfo.exe_path || portInfo.kill_reason || 'This listener is eligible for termination.'),
+    portInfo.block_reason ? `Reason: ${portInfo.block_reason}` : null
+  ].filter(Boolean);
 }
 
 const PortControl = ({
@@ -166,7 +185,18 @@ const PortControl = ({
     }
 
     try {
-      await killPortMutation.mutateAsync(pendingPort.port);
+      const refreshedPorts = await onRefresh?.();
+      const currentPort = refreshedPorts?.find((portInfo) => (
+        portInfo.port === pendingPort.port
+        && portInfo.pid === pendingPort.pid
+        && (portInfo.local_address || '') === (pendingPort.local_address || '')
+      )) || pendingPort;
+      await killPortMutation.mutateAsync({
+        port: currentPort.port,
+        pid: currentPort.pid,
+        protocol: currentPort.protocol,
+        localAddress: currentPort.local_address
+      });
       await onRefresh?.();
     } catch (error) {
       if (error?.status == null) {
@@ -383,8 +413,7 @@ const PortControl = ({
         title={pendingPort ? `Stop port ${pendingPort.port}?` : 'Stop port'}
         description="DevControl can stop managed listeners and password-authorized current-user listeners."
         details={pendingPort ? [
-          `${pendingPort.process_name} | PID ${pendingPort.pid}`,
-          pendingPort.kill_reason || 'This listener is eligible for termination.'
+          ...buildPortDetails(pendingPort)
         ] : null}
         confirmLabel={killPortMutation.isPending ? 'Stopping...' : 'Stop listener'}
         onConfirm={() => { void confirmKill(); }}

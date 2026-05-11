@@ -11,9 +11,40 @@ from security import has_current_request_control_authorization
 class ActionExecutorProcessMixin:
     """Handles process and port control actions."""
 
-    def kill_process_by_port(self, port: int):
+    def kill_process_by_port(
+        self,
+        port: int,
+        is_admin: bool = False,
+        expected_pid: int | None = None,
+        expected_protocol: str | None = None,
+        expected_local_address: str | None = None,
+    ):
         """Terminate an allowed process listening on the given port."""
-        listener = self._find_listener_by_port(port)
+        listeners = self._find_listeners_by_port(
+            port,
+            expected_pid=expected_pid,
+            expected_protocol=expected_protocol,
+            expected_local_address=expected_local_address,
+        )
+        if len(listeners) > 1:
+            self._publish_action(
+                "kill_by_port",
+                "failed",
+                message=f"Multiple listeners match port {port}. Select a specific PID or local address.",
+                severity="warning",
+                entity_type="port",
+                entity_id=port,
+                port=port,
+                reason="ambiguous_listener",
+                matches=listeners,
+            )
+            return {
+                "error": f"Multiple listeners match port {port}",
+                "reason": "ambiguous_listener",
+                "matches": listeners,
+            }, 409
+
+        listener = listeners[0] if listeners else None
         if listener is not None:
             pid = listener["pid"]
             try:
@@ -33,7 +64,7 @@ class ActionExecutorProcessMixin:
                 process = psutil.Process(pid)
                 process_name = process.name()
                 process_username = self._safe_process_username(process)
-                control_policy = describe_process_control(pid, is_admin=True, username=process_username)
+                control_policy = describe_process_control(pid, is_admin=is_admin, username=process_username)
                 if control_policy["external_killable"] and not has_current_request_control_authorization():
                     control_policy = {
                         **control_policy,
@@ -56,10 +87,53 @@ class ActionExecutorProcessMixin:
                         pid=pid,
                         process_name=process_name,
                         reason=reason,
+                        requires_admin=reason == "admin_required",
                     )
                     return {"error": message, "reason": reason}, 403
 
                 process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except psutil.TimeoutExpired:
+                    process.kill()
+                    try:
+                        process.wait(timeout=2)
+                    except psutil.TimeoutExpired:
+                        self._publish_action(
+                            "kill_by_port",
+                            "failed",
+                            message=f"Process {process_name} on port {port} did not exit after kill",
+                            severity="danger",
+                            entity_type="port",
+                            entity_id=port,
+                            port=port,
+                            pid=pid,
+                            process_name=process_name,
+                            reason="termination_timeout",
+                        )
+                        return {
+                            "error": f"Process {process_name} on port {port} did not exit after kill",
+                            "reason": "termination_timeout",
+                        }, 409
+
+                if self._is_port_still_listening(port, pid):
+                    self._publish_action(
+                        "kill_by_port",
+                        "failed",
+                        message=f"Port {port} is still listening after stopping {process_name}",
+                        severity="warning",
+                        entity_type="port",
+                        entity_id=port,
+                        port=port,
+                        pid=pid,
+                        process_name=process_name,
+                        reason="port_still_listening",
+                    )
+                    return {
+                        "error": f"Port {port} is still listening after termination",
+                        "reason": "port_still_listening",
+                    }, 409
+
                 self._publish_action(
                     "kill_by_port",
                     "success",
@@ -73,7 +147,10 @@ class ActionExecutorProcessMixin:
                     owner_scope=control_policy.get("owner_scope"),
                 )
                 return {
-                    "message": f"Process {process_name} (PID: {pid}) terminated successfully"
+                    "message": f"Process {process_name} (PID: {pid}) terminated successfully",
+                    "pid": pid,
+                    "port": port,
+                    "process_name": process_name,
                 }, 200
             except psutil.NoSuchProcess:
                 self._publish_action(
@@ -112,26 +189,102 @@ class ActionExecutorProcessMixin:
         )
         return {"error": f"No process found using port {port}"}, 404
 
-    def _find_listener_by_port(self, port: int) -> dict | None:
-        """Find one listener by port via inventory first and psutil second."""
+    def _find_listeners_by_port(
+        self,
+        port: int,
+        expected_pid: int | None = None,
+        expected_protocol: str | None = None,
+        expected_local_address: str | None = None,
+    ) -> list[dict]:
+        """Find listeners by port via inventory first and psutil second."""
+        expected_protocol = expected_protocol.lower() if expected_protocol else None
+        expected_local_address = expected_local_address.strip() if expected_local_address else None
+
+        def matches(listener: dict) -> bool:
+            if int(listener.get("port") or 0) != port:
+                return False
+            if expected_pid and int(listener.get("pid") or 0) != expected_pid:
+                return False
+            if expected_protocol and str(listener.get("protocol") or "").lower() != expected_protocol:
+                return False
+            if expected_local_address and str(listener.get("local_address") or "") != expected_local_address:
+                return False
+            return True
+
+        def normalize(listener: dict) -> dict:
+            return {
+                "port": int(listener.get("port") or port),
+                "pid": int(listener.get("pid") or 0),
+                "process_name": str(listener.get("process_name") or "Unknown"),
+                "protocol": str(listener.get("protocol") or "tcp").lower(),
+                "local_address": listener.get("local_address"),
+            }
+
         try:
             listeners = self.inventory_service.collect_ports()
-            for listener in listeners:
-                if int(listener.get("port") or 0) == port:
-                    return {
-                        "pid": int(listener.get("pid") or 0),
-                        "process_name": str(listener.get("process_name") or "Unknown"),
-                    }
+            matches_from_inventory = [normalize(listener) for listener in listeners if matches(listener)]
+            if matches_from_inventory:
+                return self._dedupe_listeners(matches_from_inventory)
         except Exception as exc:
             print(f"Inventory-backed port lookup failed, falling back to psutil: {exc}")
 
+        matches_from_psutil = []
         for conn in psutil.net_connections():
-            if conn.status == "LISTEN" and conn.laddr.port == port:
-                return {
+            if not conn.laddr:
+                continue
+            listener = {
+                "port": getattr(conn.laddr, "port", None),
+                "pid": int(conn.pid or 0),
+                "process_name": "Unknown",
+                "protocol": "tcp",
+                "local_address": self._extract_address_host(conn.laddr),
+            }
+            if conn.status == "LISTEN" and matches(listener):
+                matches_from_psutil.append({
                     "pid": int(conn.pid or 0),
-                    "process_name": None,
-                }
+                    "process_name": "Unknown",
+                    "port": port,
+                    "protocol": "tcp",
+                    "local_address": self._extract_address_host(conn.laddr),
+                })
 
+        return self._dedupe_listeners(matches_from_psutil)
+
+    def _dedupe_listeners(self, listeners: list[dict]) -> list[dict]:
+        seen = set()
+        deduped = []
+        for listener in listeners:
+            key = (
+                listener.get("port"),
+                listener.get("pid"),
+                listener.get("protocol"),
+                listener.get("local_address"),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(listener)
+        return deduped
+
+    def _is_port_still_listening(self, port: int, pid: int) -> bool:
+        """Return whether the same PID still owns a listening socket on the port."""
+        try:
+            for conn in psutil.net_connections():
+                if not conn.laddr or conn.status != "LISTEN":
+                    continue
+                if getattr(conn.laddr, "port", None) == port and int(conn.pid or 0) == pid:
+                    return True
+        except Exception:
+            return False
+        return False
+
+    def _extract_address_host(self, address) -> str | None:
+        if not address:
+            return None
+        if hasattr(address, "ip"):
+            return address.ip
+        if isinstance(address, tuple) and address:
+            return str(address[0])
         return None
 
     def kill_process(self, pid: int, is_admin: bool):

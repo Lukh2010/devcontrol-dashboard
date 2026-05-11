@@ -124,3 +124,16 @@ def test_legacy_pid_entries_without_create_time_are_not_trusted(monkeypatch):
         assert dashboard_pids.is_dashboard_pid(4321) is False
     finally:
         _cleanup_pid_file(pid_file)
+
+
+def test_pid_file_status_reports_writable_runtime_path(monkeypatch):
+    pid_file = _pid_file(".dashboard-pids-health.json")
+    _cleanup_pid_file(pid_file)
+    monkeypatch.setattr(dashboard_pids, "PID_FILE", pid_file)
+
+    try:
+        status = dashboard_pids.get_pid_file_status()
+        assert status["path"] == str(pid_file)
+        assert status["writable"] is True
+    finally:
+        _cleanup_pid_file(pid_file)

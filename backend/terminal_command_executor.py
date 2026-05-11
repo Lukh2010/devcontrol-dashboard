@@ -255,6 +255,14 @@ class TerminalCommandExecutorMixin:
                     "timestamp": time.time(),
                 })
 
+            await self.send_message({
+                "type": "command_result",
+                "command": command,
+                "classification": classification,
+                "return_code": process.returncode,
+                "success": process.returncode == 0,
+                "timestamp": time.time(),
+            })
             print(f"Command executed: {command}, Return code: {process.returncode}")
         except Exception as exc:
             print(f"Error executing command: {exc}")

@@ -11,7 +11,9 @@ from security import (
     SESSION_TTL_SECONDS,
     check_rate_limit_or_response,
     clear_failed_attempts,
+    clear_rate_limit,
     create_control_session,
+    has_current_request_control_authorization,
     has_valid_control_session,
     invalidate_request_control_session,
     is_password_protection_enabled,
@@ -52,6 +54,104 @@ def _parse_last_event_id(value: str | None) -> int | None:
         return None
 
     return parsed if parsed > 0 else None
+
+
+def _server_error(endpoint: str, exc: Exception):
+    print(f"{endpoint} failed: {exc}")
+    return jsonify({"error": "Internal server error"}), 500
+
+
+def _has_sensitive_telemetry_access() -> bool:
+    if not is_password_protection_enabled():
+        return True
+    return has_current_request_control_authorization()
+
+
+def _mask_process_entry(process: dict) -> dict:
+    masked = dict(process)
+    for field in ("username", "exe_path", "command_line"):
+        if field in masked:
+            masked[field] = None
+    masked["sensitive_masked"] = True
+    return masked
+
+
+def _mask_port_entry(port: dict) -> dict:
+    masked = dict(port)
+    for field in ("exe_path", "remote_address"):
+        if field in masked:
+            masked[field] = None
+    masked["sensitive_masked"] = True
+    return masked
+
+
+def _mask_network_info(network_info: dict) -> dict:
+    interfaces = {}
+    for name, addresses in (network_info.get("interfaces") or {}).items():
+        if not isinstance(addresses, list):
+            continue
+        interfaces[name] = [
+            {
+                "family": address.get("family"),
+                "address": address.get("address"),
+            }
+            for address in addresses
+            if isinstance(address, dict)
+        ]
+
+    return {
+        "hostname": network_info.get("hostname", "locked"),
+        "default_gateway": "Locked",
+        "interfaces": interfaces,
+        "sensitive_masked": True,
+    }
+
+
+def _mask_payload(event_type: str, payload: dict, sensitive_access: bool) -> dict:
+    if sensitive_access or not isinstance(payload, dict):
+        return payload
+
+    masked = dict(payload)
+    if "processes" in masked and isinstance(masked["processes"], list):
+        masked["processes"] = [
+            _mask_process_entry(process)
+            for process in masked["processes"]
+            if isinstance(process, dict)
+        ]
+    if "ports" in masked and isinstance(masked["ports"], list):
+        masked["ports"] = [
+            _mask_port_entry(port)
+            for port in masked["ports"]
+            if isinstance(port, dict)
+        ]
+    if "network_info" in masked and isinstance(masked["network_info"], dict):
+        masked["network_info"] = _mask_network_info(masked["network_info"])
+    masked["sensitive_masked"] = True
+    return masked
+
+
+def _mask_event(event: dict, sensitive_access: bool) -> dict:
+    if sensitive_access or not isinstance(event, dict):
+        return event
+    event_type = event.get("type", "")
+    if event_type not in {"process_snapshot", "network_snapshot"}:
+        return event
+    return {
+        **event,
+        "payload": _mask_payload(event_type, event.get("payload", {}), sensitive_access),
+    }
+
+
+def _mask_processes(processes: list[dict], sensitive_access: bool) -> list[dict]:
+    if sensitive_access:
+        return processes
+    return [_mask_process_entry(process) for process in processes]
+
+
+def _mask_ports(ports: list[dict], sensitive_access: bool) -> list[dict]:
+    if sensitive_access:
+        return ports
+    return [_mask_port_entry(port) for port in ports]
 
 
 def create_app(runtime: ServiceRuntime | None = None) -> Flask:
@@ -107,40 +207,42 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
         try:
             return jsonify(runtime.telemetry.collect_system_info())
         except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
+            return _server_error("get_system_info", exc)
 
     @app.route("/api/system/performance")
     def get_system_performance():
         try:
             return jsonify(runtime.telemetry.collect_system_performance())
         except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
+            return _server_error("get_system_performance", exc)
 
     @app.route("/api/processes")
     def get_processes():
         try:
-            return jsonify(runtime.telemetry.collect_processes(
+            processes = runtime.telemetry.collect_processes(
                 search=request.args.get("search", ""),
                 sort=request.args.get("sort", "cpu_desc"),
                 limit=_parse_limit(request.args.get("limit"), default=100),
                 dashboard_only=_parse_bool(request.args.get("dashboard_only")),
                 killable_only=_parse_bool(request.args.get("killable_only")),
-            ))
+            )
+            return jsonify(_mask_processes(processes, _has_sensitive_telemetry_access()))
         except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
+            return _server_error("get_processes", exc)
 
     @app.route("/api/ports")
     def get_ports():
         try:
-            return jsonify(runtime.telemetry.collect_ports(
+            ports = runtime.telemetry.collect_ports(
                 search=request.args.get("search", ""),
                 sort=request.args.get("sort", "port_asc"),
                 limit=_parse_limit(request.args.get("limit"), default=100),
                 dashboard_only=_parse_bool(request.args.get("dashboard_only")),
                 killable_only=_parse_bool(request.args.get("killable_only")),
-            ))
+            )
+            return jsonify(_mask_ports(ports, _has_sensitive_telemetry_access()))
         except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
+            return _server_error("get_ports", exc)
 
     @app.route("/api/port/<int:port>", methods=["DELETE"])
     def kill_process_by_port(port):
@@ -148,7 +250,13 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
         if auth_error:
             return auth_error
 
-        payload, status = runtime.actions.kill_process_by_port(port)
+        payload, status = runtime.actions.kill_process_by_port(
+            port,
+            is_admin=runtime.telemetry.collect_is_admin(),
+            expected_pid=_parse_limit(request.args.get("pid"), default=0),
+            expected_protocol=request.args.get("protocol"),
+            expected_local_address=request.args.get("local_address"),
+        )
         return jsonify(payload), status
 
     @app.route("/api/commands/run", methods=["POST"])
@@ -167,9 +275,12 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
     @app.route("/api/network/info")
     def get_network_info():
         try:
-            return jsonify(runtime.telemetry.collect_network_info())
+            network_info = runtime.telemetry.collect_network_info()
+            if not _has_sensitive_telemetry_access():
+                network_info = _mask_network_info(network_info)
+            return jsonify(network_info)
         except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
+            return _server_error("get_network_info", exc)
 
     @app.route("/api/processes/<int:pid>/kill", methods=["POST"])
     def kill_process(pid):
@@ -191,10 +302,27 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
                 "platform": runtime.telemetry.collect_system_info()["platform"]
             })
         except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
+            return _server_error("is_admin", exc)
+
+    @app.route("/api/health")
+    def get_health():
+        try:
+            runtime_health = runtime.collect_health() if hasattr(runtime, "collect_health") else {}
+            return jsonify({
+                "api": {"host": "127.0.0.1", "port": 8000, "ready": True},
+                "password": {
+                    "enabled": is_password_protection_enabled(),
+                    "session_active": has_valid_control_session(request.cookies.get(SESSION_COOKIE_NAME, "")),
+                },
+                "admin": runtime.telemetry.collect_is_admin(),
+                **runtime_health,
+            })
+        except Exception as exc:
+            return _server_error("get_health", exc)
 
     @app.route("/api/events/stream")
     def stream_events():
+        sensitive_access = _has_sensitive_telemetry_access()
         last_event_id = _parse_last_event_id(
             request.headers.get("Last-Event-ID") or request.args.get("last_event_id")
         )
@@ -209,7 +337,7 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
             try:
                 if replay_events:
                     for replay_event in replay_events:
-                        yield to_sse(replay_event)
+                        yield to_sse(_mask_event(replay_event, sensitive_access))
                 else:
                     bootstrap_collectors = [
                         ("system_snapshot", runtime.telemetry.collect_system_snapshot),
@@ -220,6 +348,7 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
                         try:
                             payload = collect_payload()
                             payload["timestamp"] = time.time()
+                            payload = _mask_payload(event_type, payload, sensitive_access)
                             yield to_sse({"type": event_type, "payload": payload})
                         except Exception as bootstrap_error:
                             yield to_sse({
@@ -236,7 +365,7 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
                 while True:
                     try:
                         event = subscriber_queue.get(timeout=20)
-                        yield to_sse(event)
+                        yield to_sse(_mask_event(event, sensitive_access))
                     except queue.Empty:
                         yield "event: heartbeat\ndata: {}\n\n"
             finally:
@@ -276,7 +405,7 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
                 "required": True
             })
         except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
+            return _server_error("validate_control_password", exc)
 
     @app.route("/api/auth/session", methods=["POST"])
     def create_auth_session():
@@ -309,6 +438,8 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
                 return response
 
             clear_failed_attempts("auth_session")
+            clear_failed_attempts("terminal_handshake")
+            clear_rate_limit("terminal_handshake")
             token, expires_at = create_control_session()
             response = make_response(jsonify({
                 "valid": True,
@@ -328,7 +459,7 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
             )
             return response
         except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
+            return _server_error("create_auth_session", exc)
 
     @app.route("/api/auth/session", methods=["DELETE"])
     def delete_auth_session():
@@ -338,7 +469,7 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
             response.delete_cookie(SESSION_COOKIE_NAME, path="/")
             return response
         except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
+            return _server_error("delete_auth_session", exc)
 
     @app.route("/api/auth/status")
     def auth_status():
@@ -351,7 +482,7 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
                 "session_active": session_active,
             })
         except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
+            return _server_error("auth_status", exc)
 
     return app
 

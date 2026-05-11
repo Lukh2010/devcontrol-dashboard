@@ -146,7 +146,22 @@ function getStopReason(process, authUnlocked, passwordProtectionEnabled) {
     return 'Unlock control access before stopping this process';
   }
 
-  return process.kill_reason || `Stop process ${process.pid}`;
+  return process.kill_reason || process.block_reason || `Stop process ${process.pid}`;
+}
+
+function buildProcessDetails(process) {
+  if (!process) {
+    return null;
+  }
+
+  return [
+    `PID: ${process.pid}`,
+    `Owner scope: ${process.owner_scope || 'unknown'}`,
+    process.username ? `User: ${process.username}` : null,
+    process.sensitive_masked ? 'Sensitive process details are locked until control access is unlocked.' : (process.command_line || process.exe_path || null),
+    process.kill_reason || 'This process is eligible for termination.',
+    process.block_reason ? `Reason: ${process.block_reason}` : null
+  ].filter(Boolean);
 }
 
 const ProcessManager = ({
@@ -608,10 +623,7 @@ const ProcessManager = ({
         open={Boolean(pendingProcess)}
         title={pendingProcess ? `Stop ${pendingProcess.name}?` : 'Stop process'}
         description="DevControl can stop managed processes and password-authorized current-user processes."
-        details={pendingProcess ? [
-          `PID: ${pendingProcess.pid}`,
-          pendingProcess.kill_reason || 'This process is eligible for termination.'
-        ] : null}
+        details={pendingProcess ? buildProcessDetails(pendingProcess) : null}
         confirmLabel={killProcessMutation.isPending ? 'Stopping...' : 'Stop process'}
         onConfirm={() => { void confirmKill(); }}
         onCancel={() => setPendingProcess(null)}

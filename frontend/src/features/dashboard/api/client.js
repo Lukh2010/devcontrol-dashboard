@@ -5,6 +5,7 @@ import {
   authSessionSchema,
   authStatusSchema,
   authValidationSchema,
+  healthSchema,
   networkInfoSchema,
   performanceSnapshotSchema,
   portsSchema,
@@ -71,6 +72,7 @@ export const dashboardQueryKeys = {
   validatePassword: (password) => ['auth-validate', password],
   authSession: ['auth-session'],
   systemAdmin: ['system-admin'],
+  health: ['health'],
   systemInfo: ['system-info'],
   systemPerformance: ['system-performance'],
   processes: ['processes'],
@@ -122,6 +124,10 @@ export function fetchSystemAdmin() {
   return getJson('/api/system/is-admin', systemAdminSchema);
 }
 
+export function fetchHealth() {
+  return getJson('/api/health', healthSchema);
+}
+
 export function fetchProcesses(options = {}) {
   return getJson(`/api/processes${buildSearchParams(options)}`, processesSchema);
 }
@@ -155,6 +161,13 @@ export function systemAdminQueryOptions() {
   };
 }
 
+export function healthQueryOptions() {
+  return {
+    queryKey: dashboardQueryKeys.health,
+    queryFn: fetchHealth
+  };
+}
+
 export function processesQueryOptions() {
   return {
     queryKey: dashboardQueryKeys.processes,
@@ -176,8 +189,13 @@ export function networkInfoQueryOptions() {
   };
 }
 
-export function killPort({ port, controlPassword }) {
-  return mutateJson(`/api/port/${port}`, {
+export function killPort({ port, controlPassword, pid, protocol, localAddress }) {
+  const query = buildSearchParams({
+    pid,
+    protocol,
+    local_address: localAddress
+  });
+  return mutateJson(`/api/port/${port}${query}`, {
     method: 'DELETE',
     headers: {
       'X-DevControl-Password': controlPassword || ''

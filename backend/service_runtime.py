@@ -1,7 +1,7 @@
 import os
 import threading
 
-from dashboard_pids import register_dashboard_pid
+from dashboard_pids import get_pid_file_status, register_dashboard_pid
 from services.action_executor import ActionExecutorService
 from services.live_update_hub import LiveUpdateHub
 from services.system_inventory_service import SystemInventoryService
@@ -17,7 +17,11 @@ class ServiceRuntime:
         self.inventory = SystemInventoryService()
         self.telemetry = TelemetryCollectorService(self.live_updates, inventory_service=self.inventory)
         self.actions = ActionExecutorService(self.live_updates, inventory_service=self.inventory)
-        self.terminal_gateway = TerminalGatewayService(self.live_updates)
+        try:
+            terminal_max_sessions = int(os.environ.get("DEVCONTROL_TERMINAL_MAX_SESSIONS", "3"))
+        except ValueError:
+            terminal_max_sessions = 3
+        self.terminal_gateway = TerminalGatewayService(self.live_updates, max_sessions=terminal_max_sessions)
 
     def start(self):
         register_dashboard_pid("backend", os.getpid())
@@ -25,3 +29,11 @@ class ServiceRuntime:
         terminal_timer = threading.Timer(2.0, self.terminal_gateway.start)
         terminal_timer.daemon = True
         terminal_timer.start()
+
+    def collect_health(self) -> dict:
+        """Return local runtime health for frontend readiness diagnostics."""
+        return {
+            "api": {"host": "127.0.0.1", "port": 8000, "ready": True},
+            "terminal": self.terminal_gateway.get_status(),
+            "pid_file": get_pid_file_status(),
+        }

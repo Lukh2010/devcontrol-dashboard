@@ -41,6 +41,8 @@ const WindowTerminal = ({
     ? { className: 'status-success', label: 'Connected' }
     : connectionState === 'rate_limited'
       ? { className: 'status-warning', label: 'Rate limited' }
+      : connectionState === 'session_limit'
+        ? { className: 'status-warning', label: 'Session limit' }
       : connectionState === 'unauthorized' || connectionState === 'session_expired'
         ? { className: 'status-danger', label: 'Locked' }
         : connectionState === 'gateway_down'

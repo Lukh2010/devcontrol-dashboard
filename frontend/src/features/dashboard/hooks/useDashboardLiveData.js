@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 import {
+  healthQueryOptions,
   networkInfoQueryOptions,
   portsQueryOptions,
   processesQueryOptions,
@@ -14,6 +15,7 @@ export function useDashboardLiveData() {
   const systemInfoQuery = useQuery(systemInfoQueryOptions());
   const systemPerformanceQuery = useQuery(systemPerformanceQueryOptions());
   const systemAdminQuery = useQuery(systemAdminQueryOptions());
+  const healthQuery = useQuery(healthQueryOptions());
   const processesQuery = useQuery(processesQueryOptions());
   const portsQuery = useQuery(portsQueryOptions());
   const networkInfoQuery = useQuery(networkInfoQueryOptions());
@@ -22,9 +24,10 @@ export function useDashboardLiveData() {
     await Promise.allSettled([
       systemInfoQuery.refetch(),
       systemPerformanceQuery.refetch(),
-      systemAdminQuery.refetch()
+      systemAdminQuery.refetch(),
+      healthQuery.refetch()
     ]);
-  }, [systemAdminQuery, systemInfoQuery, systemPerformanceQuery]);
+  }, [healthQuery, systemAdminQuery, systemInfoQuery, systemPerformanceQuery]);
 
   const refreshProcesses = useCallback(async () => {
     const result = await processesQuery.refetch();
@@ -45,6 +48,7 @@ export function useDashboardLiveData() {
     systemInfo: systemInfoQuery.data ?? null,
     performanceData: systemPerformanceQuery.data ?? null,
     isAdmin: systemAdminQuery.data?.is_admin ?? false,
+    health: healthQuery.data ?? null,
     processes: processesQuery.data ?? [],
     ports: portsQuery.data ?? [],
     networkInfo: networkInfoQuery.data ?? null,
@@ -56,6 +60,7 @@ export function useDashboardLiveData() {
     portsFetching: portsQuery.isFetching,
     portsUpdatedAt: portsQuery.dataUpdatedAt,
     networkLoading: networkInfoQuery.isLoading,
+    healthLoading: healthQuery.isLoading,
     networkUpdatedAt: networkInfoQuery.dataUpdatedAt,
     refreshSystem,
     refreshProcesses,
