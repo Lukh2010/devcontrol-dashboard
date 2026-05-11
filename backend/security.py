@@ -4,7 +4,7 @@ import secrets
 import time
 from typing import Any
 
-from flask import jsonify, request
+from flask import has_request_context, jsonify, request
 
 
 PROTECTED_ENDPOINTS_MESSAGE = "Protected action requires the launcher control password"
@@ -246,3 +246,16 @@ def require_control_password(action: str | None = None):
     if action:
         clear_failed_attempts(action)
     return None
+
+
+def has_current_request_control_authorization() -> bool:
+    """Return whether the current request proves password-backed control access."""
+    if not is_password_protection_enabled():
+        return False
+    if not has_request_context():
+        return False
+
+    if has_valid_control_session(request.cookies.get(SESSION_COOKIE_NAME, "")):
+        return True
+
+    return verify_control_password(request.headers.get("X-DevControl-Password", ""))

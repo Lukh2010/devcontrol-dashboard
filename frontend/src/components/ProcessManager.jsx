@@ -113,6 +113,42 @@ function matchesSearch(process, value) {
   return haystack.includes(value);
 }
 
+function getControlLabel(entity) {
+  if (entity.dashboard_owned || entity.owner_scope === 'managed') {
+    return { label: 'Managed', tone: 'good' };
+  }
+
+  if (entity.block_reason === 'password_mode_required') {
+    return { label: 'Password required', tone: 'warn' };
+  }
+
+  if (entity.owner_scope === 'current_user') {
+    return { label: 'Current user', tone: 'good' };
+  }
+
+  return { label: 'System/Other user', tone: 'warn' };
+}
+
+function canStopProcess(process, authUnlocked, passwordProtectionEnabled, mutationPending) {
+  if (mutationPending || !process.killable) {
+    return false;
+  }
+
+  if (passwordProtectionEnabled && !authUnlocked) {
+    return false;
+  }
+
+  return true;
+}
+
+function getStopReason(process, authUnlocked, passwordProtectionEnabled) {
+  if (passwordProtectionEnabled && !authUnlocked && process.killable) {
+    return 'Unlock control access before stopping this process';
+  }
+
+  return process.kill_reason || `Stop process ${process.pid}`;
+}
+
 const ProcessManager = ({
   processes,
   loading,
@@ -279,7 +315,7 @@ const ProcessManager = ({
           </span>
           <div>
             <h2 className="panel-title">Processes</h2>
-            <p className="panel-subtitle">Search, filter and safely control dashboard-managed processes.</p>
+            <p className="panel-subtitle">Search, filter and safely control managed or password-authorized user processes.</p>
           </div>
         </div>
 
@@ -421,6 +457,9 @@ const ProcessManager = ({
                     const secondaryLine = process.command_line || process.exe_path || process.kill_reason || 'Ready for inspection';
                     const displayedCpuPercent = getDisplayedCpuPercent(node, expanded);
                     const displayedMemoryMb = getDisplayedMemoryMb(node, expanded);
+                    const controlLabel = getControlLabel(process);
+                    const canStop = canStopProcess(process, authUnlocked, passwordProtectionEnabled, killProcessMutation.isPending);
+                    const stopReason = getStopReason(process, authUnlocked, passwordProtectionEnabled);
                     const groupTotals = node.children.length
                       ? `Group total ${formatCpuPercent(node.aggregateCpuPercent)} CPU | ${formatMemory(node.aggregateMemoryMb)}`
                       : null;
@@ -465,8 +504,8 @@ const ProcessManager = ({
                         <td>{formatMemory(displayedMemoryMb)}</td>
                         <td><span className="status-pill neutral">{process.status}</span></td>
                         <td>
-                          <span className={`status-pill ${process.dashboard_owned ? 'good' : 'warn'}`}>
-                            {process.dashboard_owned ? 'Managed' : 'External'}
+                          <span className={`status-pill ${controlLabel.tone}`}>
+                            {controlLabel.label}
                           </span>
                         </td>
                         <td>
@@ -475,8 +514,8 @@ const ProcessManager = ({
                               className="danger-button"
                               type="button"
                               onClick={() => requestKill(process)}
-                              disabled={!process.killable || killProcessMutation.isPending}
-                              title={process.kill_reason || `Stop process ${process.pid}`}
+                              disabled={!canStop}
+                              title={stopReason}
                             >
                               <Trash2 size={16} />
                               Stop
@@ -496,6 +535,9 @@ const ProcessManager = ({
                 const expanded = autoExpandTree || expandedProcessIds.has(process.pid);
                 const displayedCpuPercent = getDisplayedCpuPercent(node, expanded);
                 const displayedMemoryMb = getDisplayedMemoryMb(node, expanded);
+                const controlLabel = getControlLabel(process);
+                const canStop = canStopProcess(process, authUnlocked, passwordProtectionEnabled, killProcessMutation.isPending);
+                const stopReason = getStopReason(process, authUnlocked, passwordProtectionEnabled);
                 const groupTotals = node.children.length
                   ? `Group total ${formatCpuPercent(node.aggregateCpuPercent)} CPU | ${formatMemory(node.aggregateMemoryMb)}`
                   : null;
@@ -527,8 +569,8 @@ const ProcessManager = ({
                           </div>
                         </div>
                       </div>
-                      <span className={`status-badge ${process.killable ? 'status-success' : 'status-warning'}`}>
-                        {process.killable ? 'Killable' : 'Blocked'}
+                      <span className={`status-badge ${canStop ? 'status-success' : 'status-warning'}`}>
+                        {canStop ? 'Killable' : controlLabel.label}
                       </span>
                     </div>
                     <div className="explorer-metrics">
@@ -548,7 +590,8 @@ const ProcessManager = ({
                       className="danger-button"
                       type="button"
                       onClick={() => requestKill(process)}
-                      disabled={!process.killable || killProcessMutation.isPending}
+                      disabled={!canStop}
+                      title={stopReason}
                     >
                       <Trash2 size={16} />
                       Stop
@@ -564,7 +607,7 @@ const ProcessManager = ({
       <ConfirmDialog
         open={Boolean(pendingProcess)}
         title={pendingProcess ? `Stop ${pendingProcess.name}?` : 'Stop process'}
-        description="Only dashboard-managed processes may be terminated."
+        description="DevControl can stop managed processes and password-authorized current-user processes."
         details={pendingProcess ? [
           `PID: ${pendingProcess.pid}`,
           pendingProcess.kill_reason || 'This process is eligible for termination.'

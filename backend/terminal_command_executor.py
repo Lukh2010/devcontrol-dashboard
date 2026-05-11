@@ -11,9 +11,9 @@ from contextlib import suppress
 
 from services.command_execution import (
     build_subprocess_args,
-    is_windows_echo,
     parse_command_args,
-    render_echo_output,
+    is_internal_builtin,
+    run_internal_builtin,
 )
 
 
@@ -174,10 +174,18 @@ class TerminalCommandExecutorMixin:
                 })
                 return
 
-            if is_windows_echo(args):
+            if is_internal_builtin(args):
+                stdout_text, stderr_text = run_internal_builtin(args, self.working_dir)
+                if stderr_text:
+                    await self.send_message({
+                        "type": "error",
+                        "message": stderr_text,
+                    })
+                    return
+
                 await self.send_message({
                     "type": "output",
-                    "data": render_echo_output(args),
+                    "data": stdout_text,
                     "timestamp": time.time(),
                 })
                 return

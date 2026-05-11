@@ -30,6 +30,7 @@ class DevControlStarter:
         self.project_root = PROJECT_ROOT
         self.backend_dir = self.project_root / "backend"
         self.frontend_dir = self.project_root / "frontend"
+        self.tools_dir = self.project_root / "tools"
 
     def check_dependencies(self):
         print("[INFO] Checking dependencies...")
@@ -179,10 +180,43 @@ class DevControlStarter:
                 print("[OK] Frontend server started on http://127.0.0.1:3000")
                 return True
 
-            print(f"[ERROR] Frontend failed to start with exit code: {self.frontend_process.returncode}")
-            return False
+            print(f"[WARN] Vite frontend failed to start with exit code: {self.frontend_process.returncode}")
+            print("[INFO] Falling back to frontend/dist proxy on http://127.0.0.1:3000")
+            return self.start_frontend_dist_proxy()
         except Exception as exc:
             print(f"[ERROR] Failed to start frontend: {exc}")
+            print("[INFO] Trying frontend/dist proxy fallback on http://127.0.0.1:3000")
+            return self.start_frontend_dist_proxy()
+
+    def start_frontend_dist_proxy(self):
+        """Serve the built frontend with a localhost-only API proxy."""
+        proxy_file = self.tools_dir / "serve_dist_proxy.js"
+        dist_index = self.frontend_dir / "dist" / "index.html"
+
+        if not proxy_file.exists():
+            print("[ERROR] tools/serve_dist_proxy.js not found")
+            return False
+
+        if not dist_index.exists():
+            print("[ERROR] frontend/dist/index.html not found")
+            print("[ERROR] Build the frontend before using the dist proxy fallback")
+            return False
+
+        try:
+            self.frontend_process = subprocess.Popen(
+                ["node", str(proxy_file)],
+                cwd=self.project_root,
+            )
+            time.sleep(1)
+            if self.frontend_process.poll() is None:
+                register_dashboard_pid("frontend", self.frontend_process.pid)
+                print("[OK] Frontend dist proxy started on http://127.0.0.1:3000")
+                return True
+
+            print(f"[ERROR] Frontend dist proxy failed with exit code: {self.frontend_process.returncode}")
+            return False
+        except Exception as exc:
+            print(f"[ERROR] Failed to start frontend dist proxy: {exc}")
             return False
 
     def monitor_processes(self):

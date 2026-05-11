@@ -9,9 +9,9 @@ from flask import has_request_context, request
 
 from services.command_execution import (
     build_subprocess_args,
-    is_windows_echo,
     parse_command_args,
-    render_echo_output,
+    is_internal_builtin,
+    run_internal_builtin,
 )
 
 
@@ -76,30 +76,30 @@ class ActionExecutorCommandMixin:
                 self._publish_audit(command, "invalid", None)
                 return {"error": "Command must contain an executable"}, 400
 
-            if is_windows_echo(args):
-                stdout_text = render_echo_output(args)
+            if is_internal_builtin(args):
+                stdout_text, stderr_text = run_internal_builtin(args, ".")
                 payload = {
                     "command": command,
                     "name": name,
                     "classification": classification,
                     "return_code": 0,
                     "stdout": stdout_text,
-                    "stderr": "",
-                    "success": True
+                    "stderr": stderr_text,
+                    "success": not stderr_text
                 }
                 self._publish_action(
                     "run_command",
-                    "success",
-                    message=f"Command completed: {command}",
-                    severity="success",
+                    "success" if not stderr_text else "failed",
+                    message=f"Command completed: {command}" if not stderr_text else stderr_text,
+                    severity="success" if not stderr_text else "warning",
                     entity_type="command",
                     entity_id=command,
                     command=command,
                     name=name,
                     classification=classification,
-                    return_code=0
+                    return_code=0 if not stderr_text else 1
                 )
-                self._publish_audit(command, classification, 0)
+                self._publish_audit(command, classification, 0 if not stderr_text else 1)
                 return payload, 200
 
             result = subprocess.run(

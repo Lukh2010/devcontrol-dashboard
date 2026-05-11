@@ -66,6 +66,42 @@ function comparePorts(left, right, sort) {
   return Number(left.port || 0) - Number(right.port || 0);
 }
 
+function getControlLabel(entity) {
+  if (entity.dashboard_owned || entity.owner_scope === 'managed') {
+    return { label: 'Managed', tone: 'good' };
+  }
+
+  if (entity.block_reason === 'password_mode_required') {
+    return { label: 'Password required', tone: 'warn' };
+  }
+
+  if (entity.owner_scope === 'current_user') {
+    return { label: 'Current user', tone: 'good' };
+  }
+
+  return { label: 'System/Other user', tone: 'warn' };
+}
+
+function canStopPort(portInfo, authUnlocked, passwordProtectionEnabled, mutationPending) {
+  if (mutationPending || !portInfo.killable) {
+    return false;
+  }
+
+  if (passwordProtectionEnabled && !authUnlocked) {
+    return false;
+  }
+
+  return true;
+}
+
+function getStopReason(portInfo, authUnlocked, passwordProtectionEnabled) {
+  if (passwordProtectionEnabled && !authUnlocked && portInfo.killable) {
+    return 'Unlock control access before stopping this listener';
+  }
+
+  return portInfo.kill_reason || `Stop listener on port ${portInfo.port}`;
+}
+
 const PortControl = ({
   ports,
   loading,
@@ -160,7 +196,7 @@ const PortControl = ({
           </span>
           <div>
             <h2 className="panel-title">Ports</h2>
-            <p className="panel-subtitle">Inspect listening services and stop only managed listeners.</p>
+            <p className="panel-subtitle">Inspect listening services and stop managed or password-authorized user listeners.</p>
           </div>
         </div>
 
@@ -242,87 +278,101 @@ const PortControl = ({
                   </tr>
                 </thead>
                 <tbody>
-                  {visiblePorts.map((portInfo) => (
-                    <tr key={`${portInfo.port}-${portInfo.pid}`}>
-                      <td><strong>{portInfo.port}</strong></td>
-                      <td>
-                        <div className="process-cell-stack">
-                          <strong>{portInfo.process_name}</strong>
-                          <div className="process-chip-row">
-                            <span className={`status-pill ${portInfo.inventory_degraded ? 'warn' : 'neutral'}`}>
-                              {formatPortSourceLabel(portInfo)}
-                            </span>
-                            {portInfo.protocol ? <span className="status-pill neutral">{portInfo.protocol}</span> : null}
+                  {visiblePorts.map((portInfo) => {
+                    const controlLabel = getControlLabel(portInfo);
+                    const canStop = canStopPort(portInfo, authUnlocked, passwordProtectionEnabled, killPortMutation.isPending);
+                    const stopReason = getStopReason(portInfo, authUnlocked, passwordProtectionEnabled);
+
+                    return (
+                      <tr key={`${portInfo.port}-${portInfo.pid}`}>
+                        <td><strong>{portInfo.port}</strong></td>
+                        <td>
+                          <div className="process-cell-stack">
+                            <strong>{portInfo.process_name}</strong>
+                            <div className="process-chip-row">
+                              <span className={`status-pill ${portInfo.inventory_degraded ? 'warn' : 'neutral'}`}>
+                                {formatPortSourceLabel(portInfo)}
+                              </span>
+                              {portInfo.protocol ? <span className="status-pill neutral">{portInfo.protocol}</span> : null}
+                            </div>
+                            <span className="muted-note">{portInfo.exe_path || portInfo.kill_reason || 'Managed listener'}</span>
                           </div>
-                          <span className="muted-note">{portInfo.exe_path || portInfo.kill_reason || 'Managed listener'}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="process-cell-stack">
-                          <strong>{portInfo.local_address || 'Unknown host'}</strong>
-                          <span className="muted-note">{portInfo.state || portInfo.status}</span>
-                        </div>
-                      </td>
-                      <td>{portInfo.pid}</td>
-                      <td>
-                        <span className={`status-pill ${portInfo.dashboard_owned ? 'good' : 'warn'}`}>
-                          {portInfo.dashboard_owned ? 'Managed' : 'External'}
-                        </span>
-                      </td>
-                      <td>
-                        <div className="table-action">
-                          <button
-                            className="danger-button"
-                            type="button"
-                            onClick={() => requestKill(portInfo)}
-                            disabled={!portInfo.killable || killPortMutation.isPending}
-                            title={portInfo.kill_reason || `Stop listener on port ${portInfo.port}`}
-                          >
-                            <Trash2 size={16} />
-                            Stop
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td>
+                          <div className="process-cell-stack">
+                            <strong>{portInfo.local_address || 'Unknown host'}</strong>
+                            <span className="muted-note">{portInfo.state || portInfo.status}</span>
+                          </div>
+                        </td>
+                        <td>{portInfo.pid}</td>
+                        <td>
+                          <span className={`status-pill ${controlLabel.tone}`}>
+                            {controlLabel.label}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="table-action">
+                            <button
+                              className="danger-button"
+                              type="button"
+                              onClick={() => requestKill(portInfo)}
+                              disabled={!canStop}
+                              title={stopReason}
+                            >
+                              <Trash2 size={16} />
+                              Stop
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
             <div className="mobile-card-list">
-              {visiblePorts.map((portInfo) => (
-                <div key={`mobile-${portInfo.port}-${portInfo.pid}`} className="mini-card explorer-card">
-                  <div className="explorer-card-top">
-                    <div>
-                      <div className="action-feed-title">Port {portInfo.port}</div>
-                      <div className="muted-note">{portInfo.process_name} | PID {portInfo.pid}</div>
+              {visiblePorts.map((portInfo) => {
+                const controlLabel = getControlLabel(portInfo);
+                const canStop = canStopPort(portInfo, authUnlocked, passwordProtectionEnabled, killPortMutation.isPending);
+                const stopReason = getStopReason(portInfo, authUnlocked, passwordProtectionEnabled);
+
+                return (
+                  <div key={`mobile-${portInfo.port}-${portInfo.pid}`} className="mini-card explorer-card">
+                    <div className="explorer-card-top">
+                      <div>
+                        <div className="action-feed-title">Port {portInfo.port}</div>
+                        <div className="muted-note">{portInfo.process_name} | PID {portInfo.pid}</div>
+                      </div>
+                      <span className={`status-badge ${canStop ? 'status-success' : 'status-warning'}`}>
+                        {canStop ? 'Killable' : controlLabel.label}
+                      </span>
                     </div>
-                    <span className={`status-badge ${portInfo.killable ? 'status-success' : 'status-warning'}`}>
-                      {portInfo.killable ? 'Killable' : 'Blocked'}
-                    </span>
+                    <div className="process-chip-row">
+                      <span className={`status-pill ${portInfo.inventory_degraded ? 'warn' : 'neutral'}`}>
+                        {formatPortSourceLabel(portInfo)}
+                      </span>
+                      <span className={`status-pill ${controlLabel.tone}`}>{controlLabel.label}</span>
+                      {portInfo.protocol ? <span className="status-pill neutral">{portInfo.protocol}</span> : null}
+                    </div>
+                    <div className="explorer-metrics">
+                      <span>{portInfo.local_address || 'Unknown host'}</span>
+                      <span>{portInfo.state || portInfo.status}</span>
+                    </div>
+                    <div className="muted-note wrap-text">{portInfo.kill_reason || 'Dashboard-owned listener.'}</div>
+                    <button
+                      className="danger-button"
+                      type="button"
+                      onClick={() => requestKill(portInfo)}
+                      disabled={!canStop}
+                      title={stopReason}
+                    >
+                      <ShieldAlert size={16} />
+                      Stop listener
+                    </button>
                   </div>
-                  <div className="process-chip-row">
-                    <span className={`status-pill ${portInfo.inventory_degraded ? 'warn' : 'neutral'}`}>
-                      {formatPortSourceLabel(portInfo)}
-                    </span>
-                    {portInfo.protocol ? <span className="status-pill neutral">{portInfo.protocol}</span> : null}
-                  </div>
-                  <div className="explorer-metrics">
-                    <span>{portInfo.local_address || 'Unknown host'}</span>
-                    <span>{portInfo.state || portInfo.status}</span>
-                  </div>
-                  <div className="muted-note wrap-text">{portInfo.kill_reason || 'Dashboard-owned listener.'}</div>
-                  <button
-                    className="danger-button"
-                    type="button"
-                    onClick={() => requestKill(portInfo)}
-                    disabled={!portInfo.killable || killPortMutation.isPending}
-                  >
-                    <ShieldAlert size={16} />
-                    Stop listener
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </>
         )}
@@ -331,7 +381,7 @@ const PortControl = ({
       <ConfirmDialog
         open={Boolean(pendingPort)}
         title={pendingPort ? `Stop port ${pendingPort.port}?` : 'Stop port'}
-        description="Only listeners owned by DevControl-managed processes can be terminated."
+        description="DevControl can stop managed listeners and password-authorized current-user listeners."
         details={pendingPort ? [
           `${pendingPort.process_name} | PID ${pendingPort.pid}`,
           pendingPort.kill_reason || 'This listener is eligible for termination.'

@@ -2,39 +2,63 @@
 
 from __future__ import annotations
 
-import platform
-
 import psutil
 
-from dashboard_pids import is_dashboard_pid
+from process_control_policy import describe_process_control
+from security import has_current_request_control_authorization
 
 
 class ActionExecutorProcessMixin:
     """Handles process and port control actions."""
 
     def kill_process_by_port(self, port: int):
-        """Terminate the dashboard-owned process listening on the given port."""
+        """Terminate an allowed process listening on the given port."""
         listener = self._find_listener_by_port(port)
         if listener is not None:
             pid = listener["pid"]
             try:
-                if not pid or not is_dashboard_pid(pid):
+                if not pid:
                     self._publish_action(
                         "kill_by_port",
                         "failed",
-                        message=f"Port {port} is not owned by a DevControl-managed process",
+                        message=f"Port {port} has no process PID to terminate",
                         severity="danger",
                         entity_type="port",
                         entity_id=port,
                         port=port,
-                        reason="not_dashboard_pid",
+                        reason="protected_process",
                     )
-                    return {
-                        "error": f"Port {port} is not owned by a dashboard-managed process"
-                    }, 403
+                    return {"error": f"Port {port} has no process PID to terminate"}, 403
 
                 process = psutil.Process(pid)
                 process_name = process.name()
+                process_username = self._safe_process_username(process)
+                control_policy = describe_process_control(pid, is_admin=True, username=process_username)
+                if control_policy["external_killable"] and not has_current_request_control_authorization():
+                    control_policy = {
+                        **control_policy,
+                        "killable": False,
+                        "kill_reason": "Valid control password session required",
+                        "block_reason": "password_mode_required",
+                    }
+
+                if not control_policy["killable"]:
+                    reason = control_policy.get("block_reason") or "not_current_user_process"
+                    message = control_policy.get("kill_reason") or "Port listener cannot be stopped"
+                    self._publish_action(
+                        "kill_by_port",
+                        "failed",
+                        message=message,
+                        severity="danger",
+                        entity_type="port",
+                        entity_id=port,
+                        port=port,
+                        pid=pid,
+                        process_name=process_name,
+                        reason=reason,
+                    )
+                    return {"error": message, "reason": reason}, 403
+
                 process.terminate()
                 self._publish_action(
                     "kill_by_port",
@@ -45,12 +69,25 @@ class ActionExecutorProcessMixin:
                     entity_id=port,
                     port=port,
                     pid=pid,
-                    process_name=process_name
+                    process_name=process_name,
+                    owner_scope=control_policy.get("owner_scope"),
                 )
                 return {
                     "message": f"Process {process_name} (PID: {pid}) terminated successfully"
                 }, 200
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
+            except psutil.NoSuchProcess:
+                self._publish_action(
+                    "kill_by_port",
+                    "failed",
+                    message=f"Cannot find the process on port {port}",
+                    severity="warning",
+                    entity_type="port",
+                    entity_id=port,
+                    port=port,
+                    reason="process_not_found",
+                )
+                return {"error": f"Cannot find process on port {port}", "reason": "process_not_found"}, 404
+            except psutil.AccessDenied:
                 self._publish_action(
                     "kill_by_port",
                     "failed",
@@ -59,9 +96,9 @@ class ActionExecutorProcessMixin:
                     entity_type="port",
                     entity_id=port,
                     port=port,
-                    reason="access_denied_or_missing",
+                    reason="access_denied",
                 )
-                return {"error": f"Cannot terminate process on port {port}"}, 403
+                return {"error": f"Cannot terminate process on port {port}", "reason": "access_denied"}, 403
 
         self._publish_action(
             "kill_by_port",
@@ -98,27 +135,11 @@ class ActionExecutorProcessMixin:
         return None
 
     def kill_process(self, pid: int, is_admin: bool):
-        """Terminate one dashboard-owned process if it is allowed."""
-        if platform.system() == "Windows" and not is_admin:
-            self._publish_action(
-                "kill_process",
-                "failed",
-                message="Administrator privileges required",
-                severity="warning",
-                entity_type="process",
-                entity_id=pid,
-                pid=pid,
-                requires_admin=True,
-                reason="admin_required",
-            )
-            return {
-                "error": "Administrator privileges required",
-                "message": "Please run the dashboard as Administrator"
-            }, 403
-
+        """Terminate one allowed process if it is safe to do so."""
         try:
             process = psutil.Process(pid)
             process_name = process.name()
+            process_username = self._safe_process_username(process)
         except psutil.NoSuchProcess:
             self._publish_action(
                 "kill_process",
@@ -131,22 +152,48 @@ class ActionExecutorProcessMixin:
                 reason="process_not_found",
             )
             return {"error": f"Process {pid} not found"}, 404
-
-        if not is_dashboard_pid(pid):
+        except psutil.AccessDenied:
             self._publish_action(
                 "kill_process",
                 "failed",
-                message=f"Process {pid} is not managed by DevControl",
+                message=f"Access denied while inspecting process {pid}",
                 severity="danger",
                 entity_type="process",
                 entity_id=pid,
                 pid=pid,
-                reason="not_dashboard_pid",
+                reason="access_denied",
+            )
+            return {"error": f"Access denied to process {pid}", "reason": "access_denied"}, 403
+
+        control_policy = describe_process_control(pid, is_admin=is_admin, username=process_username)
+        if control_policy["external_killable"] and not has_current_request_control_authorization():
+            control_policy = {
+                **control_policy,
+                "killable": False,
+                "kill_reason": "Valid control password session required",
+                "block_reason": "password_mode_required",
+            }
+
+        if not control_policy["killable"]:
+            reason = control_policy.get("block_reason") or "not_current_user_process"
+            requires_admin = reason == "admin_required"
+            self._publish_action(
+                "kill_process",
+                "failed",
+                message=control_policy.get("kill_reason") or f"Process {pid} cannot be stopped",
+                severity="warning" if requires_admin else "danger",
+                entity_type="process",
+                entity_id=pid,
+                pid=pid,
+                reason=reason,
                 name=process_name,
+                requires_admin=requires_admin,
+                owner_scope=control_policy.get("owner_scope"),
             )
             return {
-                "error": "Can only kill dashboard processes",
-                "message": f"Process {pid} ({process_name}) is not a dashboard process"
+                "error": control_policy.get("kill_reason") or f"Process {pid} cannot be stopped",
+                "message": f"Process {pid} ({process_name}) cannot be stopped",
+                "reason": reason,
             }, 403
 
         try:
@@ -189,6 +236,7 @@ class ActionExecutorProcessMixin:
             entity_id=pid,
             pid=pid,
             name=process_name,
+            owner_scope=control_policy.get("owner_scope"),
         )
         return {
             "success": True,
@@ -196,3 +244,10 @@ class ActionExecutorProcessMixin:
             "pid": pid,
             "name": process_name
         }, 200
+
+    def _safe_process_username(self, process) -> str | None:
+        """Return process username without letting access errors escape."""
+        try:
+            return process.username()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+            return None

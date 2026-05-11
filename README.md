@@ -8,8 +8,8 @@ The frontend dev server, backend API, and terminal gateway are intended to bind 
 ## What It Does
 
 - live system performance monitoring
-- process inspection and dashboard-owned process termination
-- listening-port inspection and dashboard-owned port termination
+- process inspection and safe managed/current-user process termination
+- listening-port inspection and safe managed/current-user port termination
 - network interface and gateway overview
 - browser terminal with command safety checks
 - optional password protection for sensitive actions
@@ -59,6 +59,7 @@ What it does:
 - starts terminal WebSocket on `ws://127.0.0.1:8003`
 - installs missing backend and frontend dependencies
 - asks whether you want password protection enabled
+- falls back to serving `frontend/dist` on `127.0.0.1:3000` if the Vite dev server cannot start
 
 If you enable a password, enter the same password in the dashboard UI to unlock protected actions.
 
@@ -109,6 +110,14 @@ npm run dev -- --host 127.0.0.1
 
 The committed Vite config already binds the frontend dev server to `127.0.0.1`, so it is not reachable from other interfaces unless you explicitly override it.
 
+If a local security policy blocks Node child-process launches required by Vite or esbuild, build output can be served with the local dist proxy:
+
+```bash
+node tools/serve_dist_proxy.js
+```
+
+The proxy binds to `127.0.0.1:3000`, serves `frontend/dist`, and forwards `/api` requests to `127.0.0.1:8000`.
+
 Optional password:
 
 Windows PowerShell:
@@ -141,7 +150,10 @@ Current safeguards:
 - optional password gate for sensitive actions
 - server-side auth session cookie for protected HTTP actions
 - `X-DevControl-Password` support for protected HTTP actions and terminal handshake
-- dashboard-owned PID restriction for process and port termination
+- dashboard-owned PID restriction for managed process and port termination
+- password-only external process control for current-user-owned non-system processes and listener ports
+- no-password mode disables external stop controls with a password-required reason
+- system, service, other-user, protected PID, and active DevControl backend processes are blocked from termination
 - command classification with dangerous-command blocking and explicit confirmation for unknown commands
 - shell operators such as `&`, `&&`, `|`, `>`, `<`, backticks, and command substitution are blocked for user input
 - in-memory rate limiting for auth, protected HTTP actions, and terminal handshakes
@@ -182,6 +194,7 @@ devcontrol-dashboard/
 |   |-- app.py
 |   |-- command_classifier.py
 |   |-- dashboard_pids.py
+|   |-- process_control_policy.py
 |   |-- requirements.txt
 |   |-- security.py
 |   |-- service_runtime.py

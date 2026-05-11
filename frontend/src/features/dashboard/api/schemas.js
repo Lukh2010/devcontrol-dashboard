@@ -73,7 +73,10 @@ export const portSchema = z.object({
   inventory_source: z.string().optional(),
   inventory_degraded: z.boolean().optional(),
   dashboard_owned: z.boolean().optional(),
+  owner_scope: z.string().optional(),
+  external_killable: z.boolean().optional(),
   killable: z.boolean().optional(),
+  block_reason: z.string().nullable().optional(),
   kill_reason: z.string().nullable().optional()
 });
 
@@ -91,7 +94,10 @@ export const processSchema = z.object({
   inventory_source: z.string().optional(),
   inventory_degraded: z.boolean().optional(),
   dashboard_owned: z.boolean().optional(),
+  owner_scope: z.string().optional(),
+  external_killable: z.boolean().optional(),
   killable: z.boolean().optional(),
+  block_reason: z.string().nullable().optional(),
   kill_reason: z.string().nullable().optional()
 });
 

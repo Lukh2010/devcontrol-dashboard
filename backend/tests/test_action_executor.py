@@ -214,13 +214,16 @@ class FakeInventoryService:
 
 
 def test_kill_process_by_port_uses_inventory_lookup(monkeypatch):
-    monkeypatch.setattr("services.action_executor_processes.is_dashboard_pid", lambda pid: pid == 4321)
+    monkeypatch.setattr("process_control_policy.is_dashboard_pid", lambda pid: pid == 4321)
 
     terminated = {"called": False}
 
     class FakeProcess:
         def name(self):
             return "dashboard-api.exe"
+
+        def username(self):
+            return "lukas"
 
         def terminate(self):
             terminated["called"] = True
@@ -237,3 +240,124 @@ def test_kill_process_by_port_uses_inventory_lookup(monkeypatch):
     assert status == 200
     assert terminated["called"] is True
     assert "4321" in payload["message"]
+
+
+def test_current_user_process_can_be_killed_with_password(monkeypatch):
+    client, headers = make_authenticated_client(monkeypatch)
+    monkeypatch.setattr("process_control_policy.is_dashboard_pid", lambda pid: False)
+    monkeypatch.setattr("process_control_policy.current_username", lambda: "lukas")
+    terminated = {"called": False}
+
+    class FakeProcess:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def name(self):
+            return "RobloxPlayerBeta.exe"
+
+        def username(self):
+            return "DESKTOP\\lukas"
+
+        def terminate(self):
+            terminated["called"] = True
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr("services.action_executor_processes.psutil.Process", FakeProcess)
+
+    response = client.post("/api/processes/5555/kill", headers=headers)
+
+    assert response.status_code == 200
+    assert terminated["called"] is True
+    assert response.get_json()["pid"] == 5555
+
+
+def test_current_user_process_requires_password_mode(monkeypatch):
+    monkeypatch.delenv("DEVCONTROL_PASSWORD", raising=False)
+    clear_security_state()
+    app = create_app(FakeRuntime())
+    client = app.test_client()
+    monkeypatch.setattr("process_control_policy.is_dashboard_pid", lambda pid: False)
+    monkeypatch.setattr("process_control_policy.current_username", lambda: "lukas")
+
+    class FakeProcess:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def name(self):
+            return "RobloxPlayerBeta.exe"
+
+        def username(self):
+            return "DESKTOP\\lukas"
+
+    monkeypatch.setattr("services.action_executor_processes.psutil.Process", FakeProcess)
+
+    response = client.post("/api/processes/5555/kill")
+
+    assert response.status_code == 403
+    assert response.get_json()["reason"] == "password_mode_required"
+
+
+def test_other_user_process_is_blocked_even_with_password(monkeypatch):
+    client, headers = make_authenticated_client(monkeypatch)
+    monkeypatch.setattr("process_control_policy.is_dashboard_pid", lambda pid: False)
+    monkeypatch.setattr("process_control_policy.current_username", lambda: "lukas")
+
+    class FakeProcess:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def name(self):
+            return "service.exe"
+
+        def username(self):
+            return "NT AUTHORITY\\SYSTEM"
+
+    monkeypatch.setattr("services.action_executor_processes.psutil.Process", FakeProcess)
+
+    response = client.post("/api/processes/5555/kill", headers=headers)
+
+    assert response.status_code == 403
+    assert response.get_json()["reason"] == "not_current_user_process"
+
+
+def test_current_user_port_listener_can_be_killed_with_password(monkeypatch):
+    monkeypatch.setenv("DEVCONTROL_PASSWORD", "ci-password")
+    clear_security_state()
+    monkeypatch.setattr("process_control_policy.is_dashboard_pid", lambda pid: False)
+    monkeypatch.setattr("process_control_policy.current_username", lambda: "lukas")
+    terminated = {"called": False}
+
+    class Runtime(FakeRuntime):
+        def __init__(self):
+            self.telemetry = FakeTelemetry()
+            self.actions = ActionExecutorService(
+                LiveUpdateHub(),
+                inventory_service=FakeInventoryService(ports=[
+                    {"port": 9000, "pid": 5555, "process_name": "RobloxPlayerBeta.exe"}
+                ]),
+            )
+            self.live_updates = FakeLiveUpdateHub()
+
+    class FakeProcess:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def name(self):
+            return "RobloxPlayerBeta.exe"
+
+        def username(self):
+            return "DESKTOP\\lukas"
+
+        def terminate(self):
+            terminated["called"] = True
+
+    monkeypatch.setattr("services.action_executor_processes.psutil.Process", FakeProcess)
+    app = create_app(Runtime())
+    client = app.test_client()
+
+    response = client.delete("/api/port/9000", headers={"X-DevControl-Password": "ci-password"})
+
+    assert response.status_code == 200
+    assert terminated["called"] is True

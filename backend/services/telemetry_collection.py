@@ -11,7 +11,7 @@ import time
 
 import psutil
 
-from dashboard_pids import is_dashboard_pid
+from process_control_policy import describe_process_control
 
 
 class TelemetryCollectionMixin:
@@ -57,38 +57,24 @@ class TelemetryCollectionMixin:
 
     def _build_process_entry(self, process_info: dict, is_admin: bool) -> dict:
         pid = process_info["pid"]
-        dashboard_owned = bool(pid) and is_dashboard_pid(pid)
-        killable = dashboard_owned and (platform.system() != "Windows" or is_admin)
-        kill_reason = None
-
-        if not dashboard_owned:
-            kill_reason = "Not managed by DevControl"
-        elif platform.system() == "Windows" and not is_admin:
-            kill_reason = "Administrator privileges required on Windows"
+        control_policy = describe_process_control(
+            pid,
+            is_admin=is_admin,
+            username=process_info.get("username"),
+        )
 
         return {
             **process_info,
-            "dashboard_owned": dashboard_owned,
-            "killable": killable,
-            "kill_reason": kill_reason,
+            **control_policy,
         }
 
     def _build_port_entry(self, port_info: dict, is_admin: bool) -> dict:
         pid = port_info["pid"]
-        dashboard_owned = bool(pid) and is_dashboard_pid(pid)
-        killable = dashboard_owned and (platform.system() != "Windows" or is_admin)
-        kill_reason = None
-
-        if not dashboard_owned:
-            kill_reason = "Not managed by DevControl"
-        elif platform.system() == "Windows" and not is_admin:
-            kill_reason = "Administrator privileges required on Windows"
+        control_policy = describe_process_control(pid, is_admin=is_admin)
 
         return {
             **port_info,
-            "dashboard_owned": dashboard_owned,
-            "killable": killable,
-            "kill_reason": kill_reason,
+            **control_policy,
         }
 
     def _sort_processes(self, processes: list[dict], sort: str) -> list[dict]:

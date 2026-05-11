@@ -72,3 +72,16 @@ def test_windows_process_records_raise_when_all_metrics_are_zero():
         assert "zeroed process metrics" in str(exc)
     else:
         raise AssertionError("Expected unusable Windows records to raise")
+
+
+def test_windows_ports_raise_when_inventory_returns_no_listeners(monkeypatch):
+    service = SystemInventoryService()
+
+    monkeypatch.setattr(service, "_run_command", lambda _args: "")
+
+    try:
+        service._collect_windows_ports()
+    except RuntimeError as exc:
+        assert "no listening ports" in str(exc)
+    else:
+        raise AssertionError("Expected empty Windows port inventory to raise")

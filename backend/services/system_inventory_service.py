@@ -90,7 +90,10 @@ class SystemInventoryService:
                 "$result | ConvertTo-Json -Depth 4 -Compress"
             ),
         ])
-        return [self._normalize_port_record(record) for record in self._load_json_records(output)]
+        records = [self._normalize_port_record(record) for record in self._load_json_records(output)]
+        if not records:
+            raise RuntimeError("Windows inventory returned no listening ports")
+        return records
 
     def _collect_posix_processes(self) -> list[dict[str, Any]]:
         output = self._run_command([

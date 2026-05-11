@@ -1,4 +1,6 @@
 import asyncio
+import json
+from pathlib import Path
 
 from terminal_session import TerminalSession
 
@@ -91,3 +93,19 @@ def test_terminal_can_return_backend_command_classification():
 
     assert any("command_classification" in message for message in websocket.messages)
     assert any("confirmation_required" in message for message in websocket.messages)
+
+
+def test_terminal_windows_dir_builtin_runs_without_cmd(monkeypatch):
+    websocket = FakeWebSocket()
+    session = TerminalSession("test-session", websocket, working_dir=str(Path.cwd()))
+
+    monkeypatch.setattr("services.command_execution.platform.system", lambda: "Windows")
+
+    asyncio.run(session._execute_command_internal("dir", "safe"))
+
+    payloads = [json.loads(message) for message in websocket.messages]
+    output_messages = [payload for payload in payloads if payload.get("type") == "output"]
+
+    assert output_messages
+    assert "terminal_session.py" in output_messages[-1]["data"]
+    assert not any(payload.get("type") == "error" for payload in payloads)
