@@ -66,7 +66,8 @@ body::before {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -347,6 +348,17 @@ h3 {
   transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
 }
 
+.textarea {
+  min-height: 132px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.mono-input {
+  font-family: ui-monospace, "Cascadia Mono", "Cascadia Code", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+}
+
 .select {
   width: 100%;
   min-height: 44px;
@@ -385,7 +397,7 @@ h3 {
 }
 
 .nav-grid {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .network-grid {
@@ -1273,6 +1285,63 @@ h3 {
   min-height: 120px;
 }
 
+.compact-stack {
+  gap: 8px;
+}
+
+.compact-alert {
+  margin-bottom: 0;
+}
+
+.encryption-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.encryption-options,
+.encryption-main,
+.encryption-workbench,
+.encryption-key-card {
+  display: grid;
+  gap: 16px;
+}
+
+.encryption-method-card {
+  display: grid;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.encryption-main {
+  min-width: 0;
+}
+
+.encryption-key-header,
+.encryption-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.encryption-key-grid,
+.encryption-text-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.encryption-textarea {
+  min-height: 250px;
+}
+
+.encryption-actions {
+  justify-content: flex-start;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1328,11 +1397,14 @@ h3 {
   }
 
   .dashboard-grid,
-  .hero-panel {
+  .hero-panel,
+  .encryption-layout {
     grid-template-columns: 1fr;
   }
 
   .stat-grid,
+  .encryption-key-grid,
+  .encryption-text-grid,
   .metrics-three,
   .overview-grid,
   .readiness-grid {
@@ -1360,6 +1432,8 @@ h3 {
   }
 
   .nav-grid,
+  .encryption-key-grid,
+  .encryption-text-grid,
   .stat-grid,
   .metrics-three,
   .overview-grid,
@@ -1395,6 +1469,10 @@ h3 {
 
   .panel-header {
     padding-top: 18px;
+  }
+
+  .encryption-textarea {
+    min-height: 190px;
   }
 
   .hero-title {

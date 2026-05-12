@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Activity, Cpu, Network, Terminal, Wifi } from 'lucide-react';
+import { Activity, Cpu, KeyRound, Network, Terminal, Wifi } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
 import ActionFeed from './components/ActionFeed';
@@ -7,6 +7,7 @@ import AttentionPanel from './components/AttentionPanel';
 import ControlAccessPanel from './components/ControlAccessPanel';
 import DashboardHero from './components/DashboardHero';
 import DashboardNavigation from './components/DashboardNavigation';
+import EncryptionTools from './components/EncryptionTools';
 import NetworkHub from './components/NetworkHub';
 import PortControl from './components/PortControl';
 import ProcessManager from './components/ProcessManager';
@@ -25,7 +26,8 @@ const PANELS = [
   { id: 'ports', label: 'Ports', icon: Network },
   { id: 'process-manager', label: 'Processes', icon: Cpu },
   { id: 'commands', label: 'Terminal', icon: Terminal },
-  { id: 'network', label: 'Network', icon: Wifi }
+  { id: 'network', label: 'Network', icon: Wifi },
+  { id: 'encryptions', label: 'Encryptions', icon: KeyRound }
 ];
 
 const PANEL_TITLES = {
@@ -33,7 +35,8 @@ const PANEL_TITLES = {
   ports: { title: 'Ports', subtitle: 'Filter and stop only managed listeners.' },
   'process-manager': { title: 'Processes', subtitle: 'Search and control dashboard-managed processes.' },
   commands: { title: 'Terminal', subtitle: 'Guided command execution with explicit terminal states.' },
-  network: { title: 'Network', subtitle: 'Interfaces, gateway and connectivity overview.' }
+  network: { title: 'Network', subtitle: 'Interfaces, gateway and connectivity overview.' },
+  encryptions: { title: 'Encryptions', subtitle: 'Local encoding, hashing and encryption utilities.' }
 };
 
 function formatLastSeen(value) {
@@ -512,6 +515,21 @@ function AppContent() {
             passwordProtectionEnabled={passwordProtectionEnabled}
             onAction={recordUiAction}
           />
+        </motion.div>
+      );
+    }
+
+    if (activePanel === 'encryptions') {
+      return (
+        <motion.div
+          key="encryptions"
+          className="workspace-single"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -12 }}
+          transition={{ duration: 0.24, ease: 'easeOut' }}
+        >
+          <EncryptionTools />
         </motion.div>
       );
     }
