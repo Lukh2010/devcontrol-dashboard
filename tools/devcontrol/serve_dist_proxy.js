@@ -2,7 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const projectRoot = path.resolve(__dirname, '..');
+const projectRoot = path.resolve(__dirname, '..', '..');
 const root = path.join(projectRoot, 'frontend', 'dist');
 const backendHost = '127.0.0.1';
 const backendPort = Number.parseInt(process.env.DEVCONTROL_BACKEND_PORT || '8000', 10);

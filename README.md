@@ -113,11 +113,11 @@ The committed Vite config already binds the frontend dev server to `127.0.0.1`, 
 If a local security policy blocks Node child-process launches required by Vite or esbuild, use the project-local Node LTS helper first:
 
 ```bash
-python tools/frontend_lts.py install
-python tools/frontend_lts.py dev
-python tools/frontend_lts.py build
-python tools/frontend_lts.py test
-python tools/frontend_lts.py e2e
+python tools/devcontrol/frontend_lts.py install
+python tools/devcontrol/frontend_lts.py dev
+python tools/devcontrol/frontend_lts.py build
+python tools/devcontrol/frontend_lts.py test
+python tools/devcontrol/frontend_lts.py e2e
 ```
 
 The helper downloads a portable Node 22 runtime into `.devcontrol-runtime/node-lts`, verifies that Node can spawn child processes, and then starts Vite, Vitest, or Playwright through that runtime. If this still reports `child-process spawn is still blocked`, the host is denying Node child processes globally and Vite/Playwright must be run outside that restricted policy.
@@ -125,7 +125,7 @@ The helper downloads a portable Node 22 runtime into `.devcontrol-runtime/node-l
 If Vite remains unavailable but `frontend/dist` already exists, build output can be served with the local dist proxy:
 
 ```bash
-node tools/serve_dist_proxy.js
+node tools/devcontrol/serve_dist_proxy.js
 ```
 
 The proxy binds to `127.0.0.1:3000`, serves `frontend/dist`, and forwards `/api` requests to `127.0.0.1:8000`.

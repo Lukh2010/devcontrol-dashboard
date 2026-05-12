@@ -190,11 +190,11 @@ class DevControlStarter:
 
     def start_frontend_dist_proxy(self):
         """Serve the built frontend with a localhost-only API proxy."""
-        proxy_file = self.tools_dir / "serve_dist_proxy.js"
+        proxy_file = self.tools_dir / "devcontrol" / "serve_dist_proxy.js"
         dist_index = self.frontend_dir / "dist" / "index.html"
 
         if not proxy_file.exists():
-            print("[ERROR] tools/serve_dist_proxy.js not found")
+            print("[ERROR] tools/devcontrol/serve_dist_proxy.js not found")
             return False
 
         if not dist_index.exists():

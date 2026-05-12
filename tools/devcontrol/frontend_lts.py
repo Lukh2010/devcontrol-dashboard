@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 NODE_MAJOR = 22
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 RUNTIME_DIR = PROJECT_ROOT / ".devcontrol-runtime" / "node-lts"
 
