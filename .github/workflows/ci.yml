@@ -264,6 +264,51 @@ jobs:
           auth_status_after_login = request_json("/api/auth/status")
           assert auth_status_after_login["session_active"] is True
 
+          deadline = __import__("time").time() + 30
+          while __import__("time").time() < deadline:
+            health_after_login = request_json("/api/health")
+            terminal = health_after_login.get("terminal", {})
+            if terminal.get("thread_alive"):
+              break
+            __import__("time").sleep(1)
+          else:
+            raise AssertionError("Terminal gateway did not become ready")
+
+          async def terminal_smoke():
+            import asyncio
+            import websockets
+
+            cookie_header = "; ".join(f"{cookie.name}={cookie.value}" for cookie in cookies)
+            output_seen = False
+            result_seen = False
+
+            async with websockets.connect(
+              "ws://127.0.0.1:8003",
+              additional_headers={"Cookie": cookie_header},
+              open_timeout=10,
+            ) as websocket:
+              welcome = json.loads(await asyncio.wait_for(websocket.recv(), timeout=10))
+              assert welcome["type"] == "welcome"
+
+              await websocket.send(json.dumps({"type": "execute_command", "command": "dir"}))
+
+              deadline = asyncio.get_running_loop().time() + 20
+              while asyncio.get_running_loop().time() < deadline:
+                message = json.loads(await asyncio.wait_for(websocket.recv(), timeout=10))
+                if message.get("type") == "output" and message.get("data"):
+                  output_seen = True
+                if message.get("type") == "command_result":
+                  assert message["command"] == "dir"
+                  assert message["success"] is True
+                  assert message["return_code"] == 0
+                  result_seen = True
+                  break
+
+            assert output_seen is True
+            assert result_seen is True
+
+          __import__("asyncio").run(terminal_smoke())
+
           system_info = request_json("/api/system/info")
           assert system_info["hostname"]
 
@@ -343,7 +388,7 @@ jobs:
           {
             echo "## backend-smoke"
             echo "- Status: ${{ job.status }}"
-            echo "- Smoke coverage: auth status, session login/logout, protected command auth, telemetry endpoints"
+            echo "- Smoke coverage: auth status, session login/logout, protected command auth, telemetry endpoints, terminal gateway handshake"
           } >> "$GITHUB_STEP_SUMMARY"
 
   frontend-lint:

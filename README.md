@@ -110,7 +110,19 @@ npm run dev -- --host 127.0.0.1
 
 The committed Vite config already binds the frontend dev server to `127.0.0.1`, so it is not reachable from other interfaces unless you explicitly override it.
 
-If a local security policy blocks Node child-process launches required by Vite or esbuild, build output can be served with the local dist proxy:
+If a local security policy blocks Node child-process launches required by Vite or esbuild, use the project-local Node LTS helper first:
+
+```bash
+python tools/frontend_lts.py install
+python tools/frontend_lts.py dev
+python tools/frontend_lts.py build
+python tools/frontend_lts.py test
+python tools/frontend_lts.py e2e
+```
+
+The helper downloads a portable Node 22 runtime into `.devcontrol-runtime/node-lts`, verifies that Node can spawn child processes, and then starts Vite, Vitest, or Playwright through that runtime. If this still reports `child-process spawn is still blocked`, the host is denying Node child processes globally and Vite/Playwright must be run outside that restricted policy.
+
+If Vite remains unavailable but `frontend/dist` already exists, build output can be served with the local dist proxy:
 
 ```bash
 node tools/serve_dist_proxy.js
@@ -143,6 +155,8 @@ Protected endpoints:
 - `POST /api/commands/run`
 - `DELETE /api/port/<port>`
 - `POST /api/processes/<pid>/kill`
+- `GET /api/port/<port>/stop-preview`
+- `GET /api/processes/<pid>/stop-preview`
 - terminal WebSocket on port `8003`
 
 Current safeguards:
@@ -155,6 +169,8 @@ Current safeguards:
 - no-password mode disables external stop controls with a password-required reason
 - system, service, other-user, protected PID, and active DevControl backend processes are blocked from termination
 - command classification with dangerous-command blocking and explicit confirmation for unknown commands
+- dry-run stop preview for process and port actions before confirmation
+- terminal audit entries with classification, status, return code, timeout, and block reason
 - shell operators such as `&`, `&&`, `|`, `>`, `<`, backticks, and command substitution are blocked for user input
 - in-memory rate limiting for auth, protected HTTP actions, and terminal handshakes
 - localhost-only frontend, backend, and terminal binding

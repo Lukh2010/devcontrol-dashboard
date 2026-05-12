@@ -10,6 +10,14 @@ const NetworkHub = ({ networkInfo, loading }) => {
   const getConnectionStatus = () => {
     if (!networkInfo) return { className: 'status-warning', text: 'Checking' };
 
+    if (networkInfo.sensitive_masked) {
+      const maskedInterfaces = Object.keys(networkInfo.interfaces || {}).length;
+      return {
+        className: 'status-warning',
+        text: maskedInterfaces > 0 ? 'Masked' : 'Locked'
+      };
+    }
+
     const hasInterfaces = Object.keys(networkInfo.interfaces || {}).length > 0;
     const hasIPv4 = Object.values(networkInfo.interfaces || {}).some((addrs) =>
       addrs.some((addr) => addr.family === 'IPv4')
@@ -76,6 +84,12 @@ const NetworkHub = ({ networkInfo, loading }) => {
         </span>
       </div>
       <div className="panel-body stack">
+        {networkInfo.sensitive_masked ? (
+          <div className="alert warning" aria-live="polite">
+            Network details are partially hidden until control access is unlocked.
+          </div>
+        ) : null}
+
         <div className="network-grid">
           {interfaces.map(({ interfaceName, ipv4, ipv6 }) => (
             <motion.div
