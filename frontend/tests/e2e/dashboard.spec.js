@@ -592,9 +592,9 @@ test('displays action events in the recent actions feed', async ({ page }) => {
 
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'Recent actions', exact: true })).toBeVisible();
-  await expect(page.locator('.action-feed').getByText('Stopped process 1234')).toBeVisible();
-  await expect(page.locator('.action-feed').getByText('Rate limited')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Recent activity', exact: true })).toBeVisible();
+  await expect(page.getByText('Stopped process 1234')).toBeVisible();
+  await expect(page.getByRole('main').getByText('Rate limited')).toBeVisible();
 });
 
 test('unlocks password mode and executes dir in the terminal', async ({ page }) => {

@@ -182,10 +182,10 @@ describe('App auth mode rendering', () => {
     renderApp();
 
     await waitFor(() => {
-      expect(screen.getByText('dev-box')).toBeInTheDocument();
+      expect(screen.getByText('Local control center')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('Recent actions')).toBeInTheDocument();
-    expect(screen.getAllByText('Terminal session connected').length).toBeGreaterThan(0);
+    expect(screen.getByText('Recent activity')).toBeInTheDocument();
+    expect(screen.getByText('Terminal Gateway')).toBeInTheDocument();
   });
 });
