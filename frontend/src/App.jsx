@@ -2,16 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Activity, Cpu, KeyRound, Network, Terminal, Wifi } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
-import ActionFeed from './components/ActionFeed';
-import AttentionPanel from './components/AttentionPanel';
 import ControlAccessPanel from './components/ControlAccessPanel';
 import DashboardHero from './components/DashboardHero';
 import DashboardNavigation from './components/DashboardNavigation';
 import EncryptionTools from './components/EncryptionTools';
 import NetworkHub from './components/NetworkHub';
+import OverviewDashboard from './components/OverviewDashboard';
 import PortControl from './components/PortControl';
 import ProcessManager from './components/ProcessManager';
-import SystemMonitor from './components/SystemMonitor';
 import SystemReadiness from './components/SystemReadiness';
 import ToastViewport from './components/ToastViewport';
 import WindowTerminal from './components/WindowTerminal';
@@ -435,18 +433,21 @@ function AppContent() {
           exit={{ opacity: 0, y: -12 }}
           transition={{ duration: 0.24, ease: 'easeOut' }}
         >
-          <SystemMonitor performanceData={performanceData} />
-          <AttentionPanel
-            items={attentionItems}
-            actions={[
-              { label: 'Open Processes', onClick: () => setActivePanel('process-manager') },
-              { label: 'Open Ports', onClick: () => setActivePanel('ports') },
-              { label: 'Open Terminal', onClick: () => setActivePanel('commands') },
-              { label: 'Refresh all', onClick: () => { void refreshAll(); } }
-            ]}
+          <OverviewDashboard
+            actionFeed={actionFeed}
+            attentionItems={attentionItems}
+            authBadge={authBadge}
+            health={health}
+            networkInfo={networkInfo}
+            onOpenPanel={setActivePanel}
+            onRefreshAll={() => { void refreshAll(); }}
+            performanceData={performanceData}
+            ports={ports}
+            processes={processes}
+            streamBadge={streamBadge}
+            systemInfo={systemInfo}
+            terminalReadiness={terminalReadiness}
           />
-          <SystemReadiness items={readinessItems} />
-          <ActionFeed actions={actionFeed} />
         </motion.div>
       );
     }

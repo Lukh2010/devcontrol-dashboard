@@ -30,7 +30,6 @@ const WindowTerminal = ({
     currentCommand,
     setCurrentCommand,
     history,
-    safeSuggestions,
     confirmCommandPrompt,
     workingDir,
     copyState,
@@ -107,21 +106,6 @@ const WindowTerminal = ({
           </p>
         </div>
 
-        {safeSuggestions.length ? (
-          <div className="suggestion-row">
-            {safeSuggestions.map((suggestion) => (
-              <button
-                key={suggestion}
-                className="ghost-button suggestion-chip"
-                type="button"
-                onClick={() => setCurrentCommand(suggestion.split(' - ')[0])}
-              >
-                {suggestion}
-              </button>
-            ))}
-          </div>
-        ) : null}
-
         <div className="terminal-shell">
           <div className="terminal-bar">
             <div className="terminal-title-row">
@@ -168,7 +152,7 @@ const WindowTerminal = ({
                   <p className="muted-note">
                     {passwordProtectionEnabled && !authUnlocked
                       ? 'Unlock control access to start the protected session.'
-                      : 'Use a safe command or a suggestion below.'}
+                      : 'Type a safe command to begin.'}
                   </p>
                 </div>
               </div>
