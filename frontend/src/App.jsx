@@ -526,8 +526,13 @@ function AppContent() {
         transition={{ duration: 0.24, ease: 'easeOut' }}
       >
         <NetworkHub
+          authHint={authHint}
           authUnlocked={authUnlocked}
+          createAuthSessionMutation={createAuthSessionMutation}
           passwordProtectionEnabled={passwordProtectionEnabled}
+          passwordInput={passwordInput}
+          setPasswordInput={setPasswordInput}
+          unlockControl={unlockControl}
           networkInfo={networkInfo}
           loading={networkLoading && !networkInfo}
         />

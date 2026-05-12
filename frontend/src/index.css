@@ -295,6 +295,18 @@ h3 {
   gap: 12px;
 }
 
+.network-lock-view {
+  display: grid;
+  gap: 18px;
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 24px 0;
+}
+
+.network-unlock-form {
+  width: 100%;
+}
+
 .glass-note,
 .mini-card,
 .table-wrap,

@@ -6,7 +6,17 @@ function getPrimaryAddress(addresses, family) {
   return addresses.find((addr) => addr.family === family)?.address || null;
 }
 
-const NetworkHub = ({ authUnlocked = false, networkInfo, loading, passwordProtectionEnabled = true }) => {
+const NetworkHub = ({
+  authHint = 'Unlock control access to view network details.',
+  authUnlocked = false,
+  createAuthSessionMutation,
+  loading,
+  networkInfo,
+  passwordInput = '',
+  passwordProtectionEnabled = true,
+  setPasswordInput,
+  unlockControl
+}) => {
   const getConnectionStatus = () => {
     if (!networkInfo) return { className: 'status-warning', text: 'Checking' };
 
@@ -29,6 +39,60 @@ const NetworkHub = ({ authUnlocked = false, networkInfo, loading, passwordProtec
 
     return { className: 'status-danger', text: 'Offline' };
   };
+
+  if (passwordProtectionEnabled && !authUnlocked) {
+    return (
+      <motion.section
+        className="panel"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, ease: 'easeOut' }}
+      >
+        <div className="panel-header">
+          <div className="panel-title-wrap">
+            <span className="panel-icon">
+              <Wifi size={18} />
+            </span>
+            <div>
+              <h2 className="panel-title">Network</h2>
+            </div>
+          </div>
+
+          <span className="status-badge status-warning">Locked</span>
+        </div>
+        <div className="panel-body">
+          <div className="network-lock-view">
+            <div className="center-empty compact-empty">
+              <div className="stack">
+                <p className="metric-reading compact-reading">Network is locked</p>
+                <p className="muted-note">{authHint}</p>
+              </div>
+            </div>
+
+            <div className="unlock-form network-unlock-form">
+              <label className="field-label" htmlFor="network-control-password">Control Password</label>
+              <input
+                id="network-control-password"
+                className="input"
+                type="password"
+                value={passwordInput}
+                onChange={(event) => setPasswordInput?.(event.target.value)}
+                placeholder="Enter startup password"
+              />
+              <button
+                className="button"
+                type="button"
+                onClick={() => { void unlockControl?.(); }}
+                disabled={createAuthSessionMutation?.isPending}
+              >
+                {createAuthSessionMutation?.isPending ? 'Unlocking...' : 'Unlock Network'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </motion.section>
+    );
+  }
 
   if (loading || !networkInfo) {
     return (
