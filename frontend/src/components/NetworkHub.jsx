@@ -6,7 +6,7 @@ function getPrimaryAddress(addresses, family) {
   return addresses.find((addr) => addr.family === family)?.address || null;
 }
 
-const NetworkHub = ({ networkInfo, loading }) => {
+const NetworkHub = ({ authUnlocked = false, networkInfo, loading, passwordProtectionEnabled = true }) => {
   const getConnectionStatus = () => {
     if (!networkInfo) return { className: 'status-warning', text: 'Checking' };
 
@@ -56,6 +56,11 @@ const NetworkHub = ({ networkInfo, loading }) => {
   }
 
   const connectionStatus = getConnectionStatus();
+  const accessStatus = !passwordProtectionEnabled
+    ? { className: 'status-neutral', text: 'No password' }
+    : authUnlocked && !networkInfo.sensitive_masked
+      ? { className: 'status-success', text: 'Unlocked' }
+      : { className: 'status-warning', text: 'Locked' };
   const interfaces = Object.entries(networkInfo.interfaces || {}).map(([interfaceName, addresses]) => ({
     interfaceName,
     ipv4: getPrimaryAddress(addresses, 'IPv4'),
@@ -79,14 +84,23 @@ const NetworkHub = ({ networkInfo, loading }) => {
           </div>
         </div>
 
-        <span className={`status-badge ${connectionStatus.className}`}>
-          {connectionStatus.text}
-        </span>
+        <div className="inline-badges">
+          <span className={`status-badge ${accessStatus.className}`}>
+            {accessStatus.text}
+          </span>
+          <span className={`status-badge ${connectionStatus.className}`}>
+            {connectionStatus.text}
+          </span>
+        </div>
       </div>
       <div className="panel-body stack">
         {networkInfo.sensitive_masked ? (
           <div className="alert warning" aria-live="polite">
             Network details are partially hidden until control access is unlocked.
+          </div>
+        ) : passwordProtectionEnabled ? (
+          <div className="alert success" aria-live="polite">
+            Network details are unlocked for this control session.
           </div>
         ) : null}
 

@@ -124,6 +124,7 @@ function AppContent() {
     actionFeed,
     notice,
     recordUiAction,
+    restartStream,
     dismissNotice
   } = useDashboardStream();
 
@@ -195,6 +196,13 @@ function AppContent() {
 
     try {
       const result = await createAuthSessionMutation.mutateAsync(passwordInput.trim());
+      restartStream();
+      await Promise.allSettled([
+        authStatusQuery.refetch(),
+        refreshNetwork(),
+        refreshPorts(),
+        refreshProcesses()
+      ]);
       recordUiAction({
         action: 'auth_session',
         status: 'success',
@@ -220,6 +228,13 @@ function AppContent() {
   const lockControl = async () => {
     try {
       await deleteAuthSessionMutation.mutateAsync();
+      restartStream();
+      await Promise.allSettled([
+        authStatusQuery.refetch(),
+        refreshNetwork(),
+        refreshPorts(),
+        refreshProcesses()
+      ]);
       recordUiAction({
         action: 'auth_session',
         status: 'success',
@@ -511,6 +526,8 @@ function AppContent() {
         transition={{ duration: 0.24, ease: 'easeOut' }}
       >
         <NetworkHub
+          authUnlocked={authUnlocked}
+          passwordProtectionEnabled={passwordProtectionEnabled}
           networkInfo={networkInfo}
           loading={networkLoading && !networkInfo}
         />

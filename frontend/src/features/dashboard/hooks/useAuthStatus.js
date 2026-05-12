@@ -32,6 +32,9 @@ export function useCreateAuthSession() {
     mutationFn: createAuthSession,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.authStatus });
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.networkInfo });
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.ports });
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.processes });
     }
   });
 }
@@ -43,6 +46,9 @@ export function useDeleteAuthSession() {
     mutationFn: deleteAuthSession,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.authStatus });
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.networkInfo });
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.ports });
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.processes });
     }
   });
 }

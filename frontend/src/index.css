@@ -646,6 +646,11 @@ h3 {
   color: var(--warn);
 }
 
+.alert.success {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
 .alert.error {
   background: var(--danger-soft);
   color: var(--danger);
@@ -678,6 +683,13 @@ h3 {
   height: 7px;
   border-radius: 999px;
   background: currentColor;
+}
+
+.inline-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .status-success {

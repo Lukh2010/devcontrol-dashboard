@@ -31,6 +31,7 @@ const initialState = {
 
 export function DashboardStreamProvider({ children }) {
   const [state, setState] = useState(initialState);
+  const [streamRevision, setStreamRevision] = useState(0);
   const queryClient = useQueryClient();
   const reconnectTimerRef = useRef(null);
   const reconnectAttemptRef = useRef(0);
@@ -61,6 +62,22 @@ export function DashboardStreamProvider({ children }) {
 
   const dismissNotice = useCallback(() => {
     setState((prev) => ({ ...prev, notice: null }));
+  }, []);
+
+  const restartStream = useCallback(() => {
+    lastEventIdRef.current = null;
+    reconnectAttemptRef.current = 0;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    setState((prev) => ({
+      ...prev,
+      streamStatus: 'connecting',
+      reconnectAttempt: 0,
+      streamError: null
+    }));
+    setStreamRevision((revision) => revision + 1);
   }, []);
 
   useEffect(() => {
@@ -282,7 +299,7 @@ export function DashboardStreamProvider({ children }) {
         clearTimeout(reconnectTimerRef.current);
       }
     };
-  }, [queryClient]);
+  }, [queryClient, streamRevision]);
 
   const stale = useMemo(() => {
     if (!state.lastUpdate) return true;
@@ -293,8 +310,9 @@ export function DashboardStreamProvider({ children }) {
     ...state,
     stale,
     recordUiAction,
-    dismissNotice
-  }), [dismissNotice, recordUiAction, stale, state]);
+    dismissNotice,
+    restartStream
+  }), [dismissNotice, recordUiAction, restartStream, stale, state]);
 
   return (
     <DashboardStreamContext.Provider value={value}>
