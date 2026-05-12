@@ -1,6 +1,21 @@
 import { expect, test } from '@playwright/test';
 
-function sseBody({ hostname = 'playwright-box' } = {}) {
+function sseBody({
+  defaultGateway = 'Unknown',
+  hostname = 'playwright-box',
+  interfaces = {},
+  sensitiveMasked
+} = {}) {
+  const networkInfo = {
+    interfaces,
+    default_gateway: defaultGateway,
+    hostname
+  };
+
+  if (typeof sensitiveMasked === 'boolean') {
+    networkInfo.sensitive_masked = sensitiveMasked;
+  }
+
   return [
     'event: system_snapshot',
     `data: ${JSON.stringify({
@@ -31,17 +46,46 @@ function sseBody({ hostname = 'playwright-box' } = {}) {
     'event: network_snapshot',
     `data: ${JSON.stringify({
       ports: [],
-      network_info: {
-        interfaces: {},
-        default_gateway: 'Unknown',
-        hostname
-      }
+      network_info: networkInfo
     })}`,
     '',
     'event: heartbeat',
     'data: {}',
     ''
   ].join('\n');
+}
+
+async function mockTelemetryRefreshRoutes(page, { hostname = 'playwright-box' } = {}) {
+  await page.route('**/api/processes**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([])
+    });
+  });
+
+  await page.route('**/api/ports**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([])
+    });
+  });
+
+  await page.route('**/api/network/info', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        interfaces: {
+          Ethernet: [{ family: 'IPv4', address: '192.168.1.50' }]
+        },
+        default_gateway: '192.168.1.1',
+        hostname,
+        sensitive_masked: false
+      })
+    });
+  });
 }
 
 async function mockAuthSession(route) {
@@ -218,6 +262,7 @@ test('shows the password field when password protection is enabled', async ({ pa
 
 test('unlocks with password and shows unlocked state', async ({ page }) => {
   let sessionActive = false;
+  await mockTelemetryRefreshRoutes(page, { hostname: 'unlock-test-host' });
 
   await page.route('**/api/auth/status', async (route) => {
     await route.fulfill({
@@ -281,6 +326,65 @@ test('unlocks with password and shows unlocked state', async ({ page }) => {
   await page.getByRole('button', { name: 'Unlock' }).click();
 
   await expect(page.getByText(/^Unlocked$/).first()).toBeVisible();
+});
+
+test('locks the full network page until password unlock', async ({ page }) => {
+  let sessionActive = false;
+  await mockTelemetryRefreshRoutes(page, { hostname: 'network-unlocked-host' });
+
+  await page.route('**/api/auth/status', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ enabled: true, required: true, session_active: sessionActive })
+    });
+  });
+
+  await page.route('**/api/auth/session', async (route) => {
+    const body = JSON.parse(route.request().postData() ?? '{}');
+    sessionActive = body.password === 'secret-123';
+    await route.fulfill({
+      status: sessionActive ? 200 : 401,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        valid: sessionActive,
+        configured: true,
+        required: true,
+        session_active: sessionActive,
+        message: sessionActive ? 'Control session unlocked.' : 'Invalid control password'
+      })
+    });
+  });
+
+  await page.route('**/api/events/stream', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: sseBody({
+        defaultGateway: sessionActive ? '192.168.1.1' : 'Locked',
+        hostname: sessionActive ? 'network-unlocked-host' : 'network-locked-host',
+        interfaces: sessionActive
+          ? { Ethernet: [{ family: 'IPv4', address: '192.168.1.50' }] }
+          : {},
+        sensitiveMasked: !sessionActive
+      })
+    });
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Network' }).click();
+
+  await expect(page.getByText('Network is locked')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Unlock Network' })).toBeVisible();
+  await expect(page.getByText('Gateway')).toHaveCount(0);
+  await expect(page.getByText('192.168.1.1')).toHaveCount(0);
+
+  await page.locator('#network-control-password').fill('secret-123');
+  await page.getByRole('button', { name: 'Unlock Network' }).click();
+
+  await expect(page.getByText('Network details are unlocked for this control session.')).toBeVisible();
+  await expect(page.getByText('Gateway')).toBeVisible();
+  await expect(page.getByText('192.168.1.1')).toBeVisible();
 });
 
 test('locks session and shows locked state', async ({ page }) => {
@@ -429,6 +533,7 @@ test('displays action events in the recent actions feed', async ({ page }) => {
 test('unlocks password mode and executes dir in the terminal', async ({ page }) => {
   let sessionActive = false;
   await mockTerminalWebSocket(page);
+  await mockTelemetryRefreshRoutes(page, { hostname: 'terminal-dir-host' });
 
   await page.route('**/api/auth/status', async (route) => {
     await route.fulfill({
@@ -491,6 +596,7 @@ test('unlocks password mode and executes dir in the terminal', async ({ page }) 
   await page.getByRole('button', { name: 'Unlock' }).click();
 
   await expect(page.getByText(/^Unlocked$/).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Terminal' }).click();
   await expect(page.getByText('Connected').first()).toBeVisible();
 
   const terminalInput = page.getByLabel('Terminal command');
