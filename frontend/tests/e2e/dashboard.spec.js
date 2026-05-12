@@ -55,6 +55,64 @@ function sseBody({
   ].join('\n');
 }
 
+async function mockDashboardApi(page, { hostname = 'playwright-box' } = {}) {
+  await page.route('**/api/system/info', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        platform: 'Windows',
+        platform_release: '11',
+        platform_version: '10.0',
+        architecture: 'AMD64',
+        hostname,
+        processor: 'x86',
+        cpu_count: 8,
+        memory_total: 17179869184,
+        memory_available: 8589934592
+      })
+    });
+  });
+
+  await page.route('**/api/system/performance', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        cpu_percent: 18.5,
+        cpu_count: 8,
+        memory: { total: 1, available: 1, percent: 1, used: 1, free: 1 },
+        disk: { total: 1, used: 1, free: 1, percent: 1 },
+        timestamp: Date.now()
+      })
+    });
+  });
+
+  await page.route('**/api/system/is-admin', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ is_admin: true, platform: 'Windows' })
+    });
+  });
+
+  await page.route('**/api/health', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        api: { host: '127.0.0.1', port: 8000, ready: true },
+        terminal: { host: '127.0.0.1', port: 8003, thread_alive: true, session_count: 0, max_sessions: 3 },
+        pid_file: { path: '.devcontrol-runtime/pids.json', exists: true, writable: true, error: null },
+        password: { enabled: true, session_active: false },
+        admin: true
+      })
+    });
+  });
+
+  await mockTelemetryRefreshRoutes(page, { hostname });
+}
+
 async function mockTelemetryRefreshRoutes(page, { hostname = 'playwright-box' } = {}) {
   await page.route('**/api/processes**', async (route) => {
     await route.fulfill({
@@ -196,6 +254,8 @@ async function mockTerminalWebSocket(page) {
 }
 
 test('hides the password field when password protection is disabled', async ({ page }) => {
+  await mockDashboardApi(page, { hostname: 'no-password-host' });
+
   await page.route('**/api/auth/status', async (route) => {
     await route.fulfill({
       status: 200,
@@ -222,6 +282,8 @@ test('hides the password field when password protection is disabled', async ({ p
 });
 
 test('shows the password field when password protection is enabled', async ({ page }) => {
+  await mockDashboardApi(page, { hostname: 'locked-host' });
+
   await page.route('**/api/auth/status', async (route) => {
     await route.fulfill({
       status: 200,
@@ -262,7 +324,7 @@ test('shows the password field when password protection is enabled', async ({ pa
 
 test('unlocks with password and shows unlocked state', async ({ page }) => {
   let sessionActive = false;
-  await mockTelemetryRefreshRoutes(page, { hostname: 'unlock-test-host' });
+  await mockDashboardApi(page, { hostname: 'unlock-test-host' });
 
   await page.route('**/api/auth/status', async (route) => {
     await route.fulfill({
@@ -330,7 +392,7 @@ test('unlocks with password and shows unlocked state', async ({ page }) => {
 
 test('locks the full network page until password unlock', async ({ page }) => {
   let sessionActive = false;
-  await mockTelemetryRefreshRoutes(page, { hostname: 'network-unlocked-host' });
+  await mockDashboardApi(page, { hostname: 'network-unlocked-host' });
 
   await page.route('**/api/auth/status', async (route) => {
     await route.fulfill({
@@ -374,21 +436,24 @@ test('locks the full network page until password unlock', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Network' }).click();
 
-  await expect(page.getByText('Network is locked')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Unlock Network' })).toBeVisible();
-  await expect(page.getByText('Gateway')).toHaveCount(0);
-  await expect(page.getByText('192.168.1.1')).toHaveCount(0);
+  const networkPanel = page.locator('.workspace-single').filter({ hasText: 'Network is locked' });
+  await expect(networkPanel.getByText('Network is locked')).toBeVisible();
+  await expect(networkPanel.getByRole('button', { name: 'Unlock Network' })).toBeVisible();
+  await expect(networkPanel.getByText('Gateway')).toHaveCount(0);
+  await expect(networkPanel.getByText('192.168.1.1')).toHaveCount(0);
 
   await page.locator('#network-control-password').fill('secret-123');
   await page.getByRole('button', { name: 'Unlock Network' }).click();
 
-  await expect(page.getByText('Network details are unlocked for this control session.')).toBeVisible();
-  await expect(page.getByText('Gateway')).toBeVisible();
-  await expect(page.getByText('192.168.1.1')).toBeVisible();
+  const unlockedNetworkPanel = page.locator('.workspace-single').filter({ hasText: 'Network details are unlocked' });
+  await expect(unlockedNetworkPanel.getByText('Network details are unlocked for this control session.')).toBeVisible();
+  await expect(unlockedNetworkPanel.getByText('Gateway')).toBeVisible();
+  await expect(unlockedNetworkPanel.getByText('192.168.1.1')).toBeVisible();
 });
 
 test('locks session and shows locked state', async ({ page }) => {
   let sessionActive = true;
+  await mockDashboardApi(page, { hostname: 'lock-test-host' });
 
   await page.route('**/api/auth/status', async (route) => {
     await route.fulfill({
@@ -439,6 +504,8 @@ test('locks session and shows locked state', async ({ page }) => {
 });
 
 test('displays action events in the recent actions feed', async ({ page }) => {
+  await mockDashboardApi(page, { hostname: 'action-feed-host' });
+
   const actionSseBody = [
     'event: system_snapshot',
     `data: ${JSON.stringify({
@@ -533,7 +600,7 @@ test('displays action events in the recent actions feed', async ({ page }) => {
 test('unlocks password mode and executes dir in the terminal', async ({ page }) => {
   let sessionActive = false;
   await mockTerminalWebSocket(page);
-  await mockTelemetryRefreshRoutes(page, { hostname: 'terminal-dir-host' });
+  await mockDashboardApi(page, { hostname: 'terminal-dir-host' });
 
   await page.route('**/api/auth/status', async (route) => {
     await route.fulfill({
@@ -596,7 +663,7 @@ test('unlocks password mode and executes dir in the terminal', async ({ page }) 
   await page.getByRole('button', { name: 'Unlock' }).click();
 
   await expect(page.getByText(/^Unlocked$/).first()).toBeVisible();
-  await page.getByRole('button', { name: 'Terminal' }).click();
+  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
   await expect(page.getByText('Connected').first()).toBeVisible();
 
   const terminalInput = page.getByLabel('Terminal command');
