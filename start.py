@@ -398,6 +398,11 @@ def signal_handler(signum, frame):
 
 
 def prompt_for_password():
+    if os.environ.get("DEVCONTROL_SKIP_PASSWORD_PROMPT", "").strip().lower() in {"1", "true", "yes"}:
+        os.environ.pop("DEVCONTROL_PASSWORD", None)
+        print("[WARN] Password protection disabled by launcher")
+        return
+
     existing_password = os.environ.get("DEVCONTROL_PASSWORD", "").strip()
     if existing_password:
         print("[OK] Using DEVCONTROL_PASSWORD from environment")
