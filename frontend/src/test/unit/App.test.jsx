@@ -182,7 +182,7 @@ describe('App auth mode rendering', () => {
     renderApp();
 
     await waitFor(() => {
-      expect(screen.getByText('Local control center')).toBeInTheDocument();
+      expect(screen.getByText('Dashboard overview')).toBeInTheDocument();
     });
 
     expect(screen.getByText('Recent activity')).toBeInTheDocument();
