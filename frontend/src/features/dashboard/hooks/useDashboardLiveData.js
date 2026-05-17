@@ -10,15 +10,18 @@ import {
   systemInfoQueryOptions,
   systemPerformanceQueryOptions
 } from '../api/client';
+import { useSettings } from '../context/SettingsContext';
 
 export function useDashboardLiveData() {
-  const systemInfoQuery = useQuery(systemInfoQueryOptions());
-  const systemPerformanceQuery = useQuery(systemPerformanceQueryOptions());
-  const systemAdminQuery = useQuery(systemAdminQueryOptions());
-  const healthQuery = useQuery(healthQueryOptions());
-  const processesQuery = useQuery(processesQueryOptions());
-  const portsQuery = useQuery(portsQueryOptions());
-  const networkInfoQuery = useQuery(networkInfoQueryOptions());
+  const { refreshIntervalMs } = useSettings();
+  const refreshOptions = refreshIntervalMs > 0 ? { refetchInterval: refreshIntervalMs } : {};
+  const systemInfoQuery = useQuery({ ...systemInfoQueryOptions(), ...refreshOptions });
+  const systemPerformanceQuery = useQuery({ ...systemPerformanceQueryOptions(), ...refreshOptions });
+  const systemAdminQuery = useQuery({ ...systemAdminQueryOptions(), ...refreshOptions });
+  const healthQuery = useQuery({ ...healthQueryOptions(), ...refreshOptions });
+  const processesQuery = useQuery({ ...processesQueryOptions(), ...refreshOptions });
+  const portsQuery = useQuery({ ...portsQueryOptions(), ...refreshOptions });
+  const networkInfoQuery = useQuery({ ...networkInfoQueryOptions(), ...refreshOptions });
 
   const refreshSystem = useCallback(async () => {
     await Promise.allSettled([

@@ -19,7 +19,8 @@ function formatAuditTime(timestamp) {
 const WindowTerminal = ({
   authUnlocked,
   passwordProtectionEnabled,
-  onAction
+  onAction,
+  terminalSettings = {}
 }) => {
   const {
     connected,
@@ -45,7 +46,8 @@ const WindowTerminal = ({
   } = useTerminalSession({
     authUnlocked,
     passwordProtectionEnabled,
-    onAction
+    onAction,
+    terminalSettings
   });
 
   const terminalStatus = connected
@@ -159,7 +161,12 @@ const WindowTerminal = ({
             ) : (
               output.map((item, index) => (
                 <div key={`${item.timestamp}-${index}`} className="terminal-row">
-                  <div className={getLineClass(item.type)}>{item.text}</div>
+                  <div className={getLineClass(item.type)}>
+                    {terminalSettings.showTimestamps ? (
+                      <span className="terminal-line-timestamp">{formatAuditTime(item.timestamp)}</span>
+                    ) : null}
+                    {item.text}
+                  </div>
                   <button className="ghost-button terminal-copy" type="button" onClick={() => { void copyLine(item.text); }}>
                     <Copy size={14} />
                   </button>

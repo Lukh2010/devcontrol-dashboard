@@ -32,7 +32,8 @@ function resolveTerminalHost() {
 export function useTerminalSession({
   authUnlocked,
   passwordProtectionEnabled,
-  onAction
+  onAction,
+  terminalSettings = {}
 }) {
   const [connected, setConnected] = useState(false);
   const [connectionState, setConnectionState] = useState('idle');
@@ -59,10 +60,13 @@ export function useTerminalSession({
   const retryCountdown = useMemo(() => formatRelativeRetry(retryUntil), [retryUntil]);
 
   useEffect(() => {
-    if (outputEndRef.current) {
-      outputEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (terminalSettings.autoScroll !== false && outputEndRef.current) {
+      const container = outputEndRef.current.closest('.terminal-output');
+      if (container) {
+        container.scrollTop = container.scrollHeight;
+      }
     }
-  }, [output]);
+  }, [output, terminalSettings.autoScroll]);
 
   useEffect(() => {
     if (copyState !== 'done') {
@@ -162,6 +166,9 @@ export function useTerminalSession({
         setConnectionMessage('Terminal connected and ready.');
         setRetryUntil(null);
         setWorkingDir(message.working_dir);
+        if (terminalSettings.clearOnReconnect) {
+          setOutput([]);
+        }
         addOutput({ type: 'system', text: 'Connected to terminal server' });
         addOutput({ type: 'system', text: message.message });
         wsRef.current?.send(JSON.stringify({ type: 'get_safe_commands' }));
@@ -333,7 +340,7 @@ export function useTerminalSession({
       default:
         break;
     }
-  }, [addOutput]);
+  }, [addOutput, terminalSettings.clearOnReconnect]);
 
   const connectWebSocket = useCallback(() => {
     if (passwordProtectionEnabled && !authUnlocked) {

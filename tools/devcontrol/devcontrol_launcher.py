@@ -11,6 +11,7 @@ import sys
 import threading
 import tkinter as tk
 import webbrowser
+import re
 from pathlib import Path
 from tkinter import ttk
 
@@ -461,13 +462,8 @@ class DevControlLauncher(tk.Tk):
             if keep_ref:
                 self.processes[key] = process
 
-            assert process.stdout is not None
-            while True:
-                chunk = process.stdout.read(1)
-                if chunk == "" and process.poll() is not None:
-                    break
-                if chunk:
-                    self.log_queue.put(("log", chunk))
+            for line in process.stdout:
+                self.log_queue.put(("log", line))
 
             return_code = process.wait()
             if self.processes.get(key) is process:
@@ -519,7 +515,8 @@ class DevControlLauncher(tk.Tk):
             self.status_var.set("Error")
 
     def _write_log(self, text: str) -> None:
-        self.log_text.insert("end", text)
+        stripped = self._strip_ansi(text)
+        self.log_text.insert("end", stripped)
         self.log_text.see("end")
 
     def log(self, text: str) -> None:
@@ -527,6 +524,11 @@ class DevControlLauncher(tk.Tk):
 
     def clear_log(self) -> None:
         self.log_text.delete("1.0", "end")
+
+    def _strip_ansi(self, text: str) -> str:
+        import re
+        ansi_escape = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
+        return ansi_escape.sub('', text)
 
     def _refresh_status_loop(self) -> None:
         states = {key: is_port_listening(*address) for key, address in PORTS.items()}

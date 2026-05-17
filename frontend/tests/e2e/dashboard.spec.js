@@ -1,5 +1,92 @@
 import { expect, test } from '@playwright/test';
 
+const diagnosticsByPage = new WeakMap();
+
+test.beforeEach(async ({ page }) => {
+  const diagnostics = {
+    consoleErrors: [],
+    pageErrors: []
+  };
+  diagnosticsByPage.set(page, diagnostics);
+
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      diagnostics.consoleErrors.push(message.text());
+    }
+  });
+  page.on('pageerror', (error) => {
+    diagnostics.pageErrors.push(error.message);
+  });
+
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.setItem('devcontrol.activePanel', 'overview');
+      window.localStorage.setItem('devcontrol.settings.v1', JSON.stringify({
+        refreshInterval: 'realtime',
+        defaultPanel: 'overview',
+        compactMode: false,
+        reducedAnimations: false,
+        theme: 'dark',
+        accentColor: 'teal',
+        fontScale: 'normal',
+        terminalAutoScroll: true,
+        terminalClearOnReconnect: false,
+        terminalConfirmDangerous: true,
+        terminalFontSize: 'normal',
+        terminalShowTimestamps: false,
+        sensitiveTelemetryMasking: true,
+        confirmDangerousActions: true,
+        hideSensitiveNetworkInfo: true,
+        lockSensitiveTabsOnStartup: true,
+        overviewLayout: 'balanced',
+        showAdvancedPanels: true,
+        showLiveStatsGraphs: true,
+        autoOpenLastVisitedTab: true
+      }));
+    } catch {
+      // Storage can be unavailable in transitional documents; the app falls back to defaults.
+    }
+  });
+});
+
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus) {
+    return;
+  }
+
+  const diagnostics = diagnosticsByPage.get(page);
+  await testInfo.attach('dashboard-diagnostics', {
+    contentType: 'application/json',
+    body: JSON.stringify(diagnostics || {}, null, 2)
+  });
+});
+
+async function expectDashboardShell(page) {
+  const appShell = page.locator('.app-shell');
+  const deadline = Date.now() + 5000;
+
+  while (Date.now() < deadline) {
+    if (await appShell.count()) {
+      return;
+    }
+    await page.waitForTimeout(250);
+  }
+
+  const diagnostics = diagnosticsByPage.get(page) || {};
+  const rootHtml = await page.locator('#root').evaluate((node) => node.innerHTML).catch(() => '<missing root>');
+  const bodyText = await page.locator('body').innerText().catch(() => '');
+  const scriptSources = await page.locator('script').evaluateAll((scripts) => scripts.map((script) => script.src || script.textContent?.slice(0, 120) || 'inline')).catch(() => []);
+  throw new Error([
+    'Dashboard shell did not render.',
+    `URL: ${page.url()}`,
+    `Root HTML: ${rootHtml.slice(0, 1000) || '<empty>'}`,
+    `Body starts with: ${bodyText.slice(0, 1000) || '<empty>'}`,
+    `Scripts: ${JSON.stringify(scriptSources)}`,
+    `Console errors: ${JSON.stringify(diagnostics.consoleErrors || [])}`,
+    `Page errors: ${JSON.stringify(diagnostics.pageErrors || [])}`
+  ].join('\n'));
+}
+
 function sseBody({
   defaultGateway = 'Unknown',
   hostname = 'playwright-box',
@@ -275,6 +362,7 @@ test('hides the password field when password protection is disabled', async ({ p
   });
 
   await page.goto('/');
+  await expectDashboardShell(page);
 
   await expect(page.getByText('no-password-host')).toBeVisible();
   await expect(page.getByLabel('Control Password')).toHaveCount(0);
@@ -317,6 +405,7 @@ test('shows the password field when password protection is enabled', async ({ pa
   });
 
   await page.goto('/');
+  await expectDashboardShell(page);
 
   await expect(page.getByLabel('Control Password')).toBeVisible();
   await expect(page.getByText('locked-host')).toBeVisible();
@@ -383,6 +472,7 @@ test('unlocks with password and shows unlocked state', async ({ page }) => {
   });
 
   await page.goto('/');
+  await expectDashboardShell(page);
 
   await page.getByLabel('Control Password').fill('secret-123');
   await page.getByRole('button', { name: 'Unlock' }).click();
@@ -434,6 +524,7 @@ test('locks the full network page until password unlock', async ({ page }) => {
   });
 
   await page.goto('/');
+  await expectDashboardShell(page);
   await page.getByRole('button', { name: 'Network' }).click();
 
   const networkPanel = page.locator('.workspace-single').filter({ hasText: 'Network is locked' });
@@ -497,6 +588,7 @@ test('locks session and shows locked state', async ({ page }) => {
   });
 
   await page.goto('/');
+  await expectDashboardShell(page);
 
   await page.getByRole('button', { name: 'Lock', exact: true }).click();
 
@@ -591,6 +683,7 @@ test('displays action events in the recent actions feed', async ({ page }) => {
   });
 
   await page.goto('/');
+  await expectDashboardShell(page);
 
   await expect(page.getByRole('heading', { name: 'Recent activity', exact: true })).toBeVisible();
   await expect(page.getByText('Stopped process 1234')).toBeVisible();
@@ -658,6 +751,7 @@ test('unlocks password mode and executes dir in the terminal', async ({ page }) 
   });
 
   await page.goto('/');
+  await expectDashboardShell(page);
 
   await page.getByLabel('Control Password').fill('secret-123');
   await page.getByRole('button', { name: 'Unlock' }).click();

@@ -1,19 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Activity, Cpu, KeyRound, Network, Terminal, Wifi } from 'lucide-react';
+import { Activity, Cpu, KeyRound, Network, Settings, Terminal, Wifi } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
 import ControlAccessPanel from './components/ControlAccessPanel';
-import DashboardHero from './components/DashboardHero';
 import DashboardNavigation from './components/DashboardNavigation';
 import EncryptionTools from './components/EncryptionTools';
 import NetworkHub from './components/NetworkHub';
 import OverviewDashboard from './components/OverviewDashboard';
 import PortControl from './components/PortControl';
 import ProcessManager from './components/ProcessManager';
-import SystemReadiness from './components/SystemReadiness';
+import SettingsPanel from './components/SettingsPanel';
 import ToastViewport from './components/ToastViewport';
 import WindowTerminal from './components/WindowTerminal';
 import { DashboardStreamProvider, useDashboardStream } from './features/dashboard/context/DashboardStreamContext';
+import { SettingsProvider, useSettings } from './features/dashboard/context/SettingsContext';
 import { useAuthStatus, useCreateAuthSession, useDeleteAuthSession } from './features/dashboard/hooks/useAuthStatus';
 import { useDashboardLiveData } from './features/dashboard/hooks/useDashboardLiveData';
 
@@ -25,7 +25,8 @@ const PANELS = [
   { id: 'process-manager', label: 'Processes', icon: Cpu },
   { id: 'commands', label: 'Terminal', icon: Terminal },
   { id: 'network', label: 'Network', icon: Wifi },
-  { id: 'encryptions', label: 'Encryptions', icon: KeyRound }
+  { id: 'encryptions', label: 'Encryptions', icon: KeyRound },
+  { id: 'settings', label: 'Settings', icon: Settings }
 ];
 
 const PANEL_TITLES = {
@@ -34,19 +35,19 @@ const PANEL_TITLES = {
   'process-manager': { title: 'Processes', subtitle: 'Search and control dashboard-managed processes.' },
   commands: { title: 'Terminal', subtitle: 'Guided command execution with explicit terminal states.' },
   network: { title: 'Network', subtitle: 'Interfaces, gateway and connectivity overview.' },
-  encryptions: { title: 'Encryptions', subtitle: 'Local encoding, hashing and encryption utilities.' }
+  encryptions: { title: 'Encryptions', subtitle: 'Local encoding, hashing and encryption utilities.' },
+  settings: { title: 'Settings', subtitle: 'Local UI and behavior preferences saved only in this browser.' }
 };
 
-function formatLastSeen(value) {
-  if (!value) {
-    return 'Awaiting heartbeat';
+const PANEL_IDS = new Set(PANELS.map((panel) => panel.id));
+
+function resolveStoredPanel(defaultPanel) {
+  const storedPanel = window.localStorage.getItem(PANEL_STORAGE_KEY);
+  if (storedPanel && PANEL_IDS.has(storedPanel)) {
+    return storedPanel;
   }
 
-  return new Date(value).toLocaleTimeString('de-DE', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  });
+  return PANEL_IDS.has(defaultPanel) ? defaultPanel : 'overview';
 }
 
 function getTerminalReadiness({ terminalState, terminalMessage, authUnlocked, passwordProtectionEnabled }) {
@@ -110,8 +111,8 @@ function getTerminalReadiness({ terminalState, terminalMessage, authUnlocked, pa
 }
 
 function AppContent() {
-  const [currentTime, setCurrentTime] = useState(new Date());
-  const [activePanel, setActivePanel] = useState(() => window.localStorage.getItem(PANEL_STORAGE_KEY) || 'overview');
+  const { settings } = useSettings();
+  const [activePanel, setActivePanel] = useState(() => resolveStoredPanel(settings.defaultPanel));
   const [passwordInput, setPasswordInput] = useState('');
 
   const {
@@ -121,7 +122,6 @@ function AppContent() {
     reconnectAttempt,
     streamError,
     stale,
-    lastHeartbeat,
     actionFeed,
     notice,
     recordUiAction,
@@ -160,13 +160,16 @@ function AppContent() {
   const authRetryAfter = authMutationError?.retryAfter ?? null;
 
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
     window.localStorage.setItem(PANEL_STORAGE_KEY, activePanel);
   }, [activePanel]);
+
+  useEffect(() => {
+    if (settings.autoOpenLastVisitedTab) {
+      return;
+    }
+
+    setActivePanel(settings.defaultPanel);
+  }, [settings.autoOpenLastVisitedTab, settings.defaultPanel]);
 
   useEffect(() => {
     if (!notice) {
@@ -270,14 +273,6 @@ function AppContent() {
     ? { tone: stale ? 'status-warning' : 'status-success', label: stale ? 'Stale stream' : 'Live stream' }
     : { tone: 'status-warning', label: reconnectAttempt ? `Reconnecting x${reconnectAttempt}` : 'Connecting' };
 
-  const terminalBadge = terminalState === 'connected'
-    ? { tone: 'status-success', label: 'Terminal ready' }
-    : terminalState === 'rate_limited'
-      ? { tone: 'status-warning', label: 'Rate limited' }
-      : terminalState === 'unauthorized'
-        ? { tone: 'status-danger', label: 'Terminal locked' }
-        : { tone: 'status-neutral', label: 'Terminal idle' };
-
   const authHint = !passwordProtectionEnabled
     ? 'Password protection is disabled for this session.'
     : authUnlocked
@@ -295,52 +290,17 @@ function AppContent() {
     passwordProtectionEnabled
   }), [authUnlocked, passwordProtectionEnabled, terminalMessage, terminalState]);
 
-  const readinessItems = [
-    {
-      label: 'Backend',
-      badgeTone: systemInfo ? 'status-success' : 'status-warning',
-      badgeLabel: systemInfo ? 'Ready' : 'Waiting',
-      summary: systemInfo ? 'API live on 127.0.0.1:8000' : 'Waiting for bootstrap snapshot',
-      hint: streamError || 'Flask API and telemetry bootstrap.'
-    },
-    {
-      label: 'Live stream',
-      badgeTone: streamBadge.tone,
-      badgeLabel: streamBadge.label,
-      summary: stale ? 'Stream data is stale.' : 'SSE snapshots are current.',
-      hint: `Heartbeat ${formatLastSeen(lastHeartbeat)}`
-    },
-    {
-      label: 'Terminal',
-      badgeTone: health?.terminal?.thread_alive ? terminalReadiness.tone : 'status-warning',
-      badgeLabel: health?.terminal?.thread_alive ? terminalReadiness.label : 'Starting',
-      summary: health?.terminal?.thread_alive ? terminalReadiness.summary : 'Waiting for terminal gateway.',
-      hint: health?.terminal
-        ? `${health.terminal.host}:${health.terminal.port} | ${health.terminal.session_count}/${health.terminal.max_sessions} sessions`
-        : terminalReadiness.hint
-    },
-    {
-      label: 'Auth',
-      badgeTone: authBadge.tone,
-      badgeLabel: authBadge.label,
-      summary: authUnlocked ? 'Control session is active.' : 'Protected actions are locked.',
-      hint: authHint
-    },
-    {
-      label: 'Admin',
-      badgeTone: isAdmin ? 'status-success' : 'status-warning',
-      badgeLabel: isAdmin ? 'Available' : 'Limited',
-      summary: isAdmin ? 'Windows admin actions are available.' : 'Process termination may be blocked.',
-      hint: 'Only dashboard-owned processes and ports remain killable.'
-    },
-    {
-      label: 'PID tracking',
-      badgeTone: health?.pid_file?.writable ? 'status-success' : 'status-danger',
-      badgeLabel: health?.pid_file?.writable ? 'Writable' : 'Blocked',
-      summary: health?.pid_file?.exists ? 'Dashboard process registry exists.' : 'Dashboard process registry is ready.',
-      hint: health?.pid_file?.error || health?.pid_file?.path || 'Runtime PID file status is loading.'
-    }
-  ];
+  const terminalSettings = useMemo(() => ({
+    autoScroll: settings.terminalAutoScroll,
+    clearOnReconnect: settings.terminalClearOnReconnect,
+    confirmDangerous: settings.terminalConfirmDangerous,
+    showTimestamps: settings.terminalShowTimestamps
+  }), [
+    settings.terminalAutoScroll,
+    settings.terminalClearOnReconnect,
+    settings.terminalConfirmDangerous,
+    settings.terminalShowTimestamps
+  ]);
 
   const attentionItems = useMemo(() => {
     const items = [];
@@ -410,8 +370,7 @@ function AppContent() {
     });
   };
 
-  const heroAttention = attentionItems.slice(0, 3);
-  const panelMeta = PANEL_TITLES[activePanel];
+  const panelMeta = PANEL_TITLES[activePanel] ?? PANEL_TITLES.overview;
 
   const currentStats = {
     systemInfo,
@@ -515,6 +474,7 @@ function AppContent() {
             authUnlocked={authUnlocked}
             passwordProtectionEnabled={passwordProtectionEnabled}
             onAction={recordUiAction}
+            terminalSettings={terminalSettings}
           />
         </motion.div>
       );
@@ -531,6 +491,21 @@ function AppContent() {
           transition={{ duration: 0.24, ease: 'easeOut' }}
         >
           <EncryptionTools />
+        </motion.div>
+      );
+    }
+
+    if (activePanel === 'settings') {
+      return (
+        <motion.div
+          key="settings"
+          className="workspace-single"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -12 }}
+          transition={{ duration: 0.24, ease: 'easeOut' }}
+        >
+          <SettingsPanel />
         </motion.div>
       );
     }
@@ -567,16 +542,6 @@ function AppContent() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: 'easeOut' }}
       >
-        <DashboardHero
-          currentTime={currentTime}
-          authBadge={authBadge}
-          streamBadge={streamBadge}
-          terminalBadge={terminalBadge}
-          heroAttention={heroAttention}
-          lastHeartbeat={lastHeartbeat}
-          stale={stale}
-        />
-
         <section className="dashboard-grid">
           <aside className="sidebar-stack">
             <ControlAccessPanel
@@ -594,7 +559,6 @@ function AppContent() {
               lockControl={lockControl}
             />
 
-            <SystemReadiness items={readinessItems} />
           </aside>
 
           <main className="workspace-stack">
@@ -622,9 +586,11 @@ function AppContent() {
 
 function App() {
   return (
-    <DashboardStreamProvider>
-      <AppContent />
-    </DashboardStreamProvider>
+    <SettingsProvider>
+      <DashboardStreamProvider>
+        <AppContent />
+      </DashboardStreamProvider>
+    </SettingsProvider>
   );
 }
 

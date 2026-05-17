@@ -122,9 +122,9 @@ function OverviewDashboard({
         <div className="panel-body overview-status-body">
           <div className="overview-status-copy">
             <p className="hero-kicker">DevControl</p>
-            <h2 className="overview-home-title">Local control center</h2>
+            <h2 className="overview-home-title">Dashboard overview</h2>
             <p className="overview-home-subtitle">
-              Monitor the local runtime, review protected actions and jump into the tools that need attention.
+              Monitor system runtime, protected actions and jump into tools that need attention.
             </p>
           </div>
 

@@ -223,7 +223,7 @@ Current limitations:
 
 - password sessions are in memory and reset on backend restart
 - rate limits are in memory and reset on backend restart
-- the browser terminal is subprocess-based, not a full PTY shell
+- the browser terminal attempts PTY via `ptyprocess` (Linux) or `pywinpty` (Windows), falling back to subprocess
 - this is still a local control panel, not a hardened remote-admin product
 
 ## Architecture
