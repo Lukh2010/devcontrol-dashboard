@@ -118,6 +118,7 @@ public
 # Temporary folders
 tmp/
 temp/
+test_sandbox/
 
 # Editor directories and files
 .vscode/*
@@ -196,6 +197,7 @@ fix_*.ps1
 *.md
 !README.md
 !LICENSE
+!AGENTS.md
 !docs/
 !docs/*.md
 AI Info.md
