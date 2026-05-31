@@ -86,6 +86,7 @@ export function DashboardStreamProvider({ children }) {
     if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
     heartbeatTimerRef.current = setInterval(() => {
       if (state.lastHeartbeat && Date.now() - state.lastHeartbeat > 10000) {
+        // eslint-disable-next-line no-console -- intentional runtime monitoring
         console.warn('Heartbeat missed, restarting stream');
         restartStream();
       }
