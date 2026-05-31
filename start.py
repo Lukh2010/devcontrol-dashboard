@@ -366,6 +366,27 @@ class DevControlStarter:
 
         print("[OK] Port cleanup completed")
 
+    def wait_for_ports(self, timeout=10):
+        """Wait for required ports to be free."""
+        print(f"[INFO] Checking port availability: {PORTS_TO_CLEAN}...")
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            busy = False
+            for conn in psutil.net_connections():
+                if conn.laddr and conn.laddr.port in PORTS_TO_CLEAN:
+                    busy = True
+                    break
+            
+            if not busy:
+                print("[OK] Ports are free")
+                return True
+            
+            time.sleep(0.5)
+        
+        print("[WARN] Timeout waiting for ports to be free. Attempting to force cleanup...")
+        self.cleanup_ports()
+        return True
+
     def run(self):
         print("DevControl Dashboard - Run")
         print("=" * 50)
@@ -375,6 +396,8 @@ class DevControlStarter:
 
         print("[CLEAN] Cleaning up ports before starting...")
         self.cleanup_ports()
+        if not self.wait_for_ports():
+            return False
 
         if not self.start_backend():
             return False

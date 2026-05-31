@@ -80,19 +80,27 @@ def _has_sensitive_telemetry_access() -> bool:
 
 
 def _mask_process_entry(process: dict) -> dict:
-    masked = dict(process)
-    for field in ("username", "exe_path", "command_line"):
-        if field in masked:
-            masked[field] = None
+    # Allow-list of safe fields
+    allowed = {
+        "pid", "name", "cpu_percent", "memory_mb", "status", 
+        "parent_pid", "started_at", "inventory_source", 
+        "inventory_degraded", "dashboard_owned", "owner_scope", 
+        "external_killable", "killable", "block_reason", "kill_reason"
+    }
+    masked = {k: v for k, v in process.items() if k in allowed}
     masked["sensitive_masked"] = True
     return masked
 
 
 def _mask_port_entry(port: dict) -> dict:
-    masked = dict(port)
-    for field in ("exe_path", "remote_address"):
-        if field in masked:
-            masked[field] = None
+    # Allow-list of safe fields
+    allowed = {
+        "port", "process_name", "pid", "status", "protocol", 
+        "local_address", "state", "inventory_source", 
+        "inventory_degraded", "dashboard_owned", "owner_scope", 
+        "external_killable", "killable", "block_reason", "kill_reason"
+    }
+    masked = {k: v for k, v in port.items() if k in allowed}
     masked["sensitive_masked"] = True
     return masked
 

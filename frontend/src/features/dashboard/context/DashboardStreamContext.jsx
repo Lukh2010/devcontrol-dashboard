@@ -80,6 +80,19 @@ export function DashboardStreamProvider({ children }) {
     setStreamRevision((revision) => revision + 1);
   }, []);
 
+  const heartbeatTimerRef = useRef(null);
+
+  useEffect(() => {
+    if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
+    heartbeatTimerRef.current = setInterval(() => {
+      if (state.lastHeartbeat && Date.now() - state.lastHeartbeat > 10000) {
+        console.warn('Heartbeat missed, restarting stream');
+        restartStream();
+      }
+    }, 5000);
+    return () => clearInterval(heartbeatTimerRef.current);
+  }, [state.lastHeartbeat, restartStream]);
+
   useEffect(() => {
     let source;
     let cancelled = false;
