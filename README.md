@@ -79,6 +79,17 @@ python start.py stop
 
 `stop` terminates only registered dashboard-owned processes from the project-local PID file.
 
+Legacy terminal wrappers still delegate to `start.py`:
+
+```bat
+tools\start_windows.bat
+```
+
+```bash
+chmod +x tools/start_linux.sh
+./tools/start_linux.sh
+```
+
 ## Password Mode
 
 Password protection is optional.
@@ -284,7 +295,9 @@ devcontrol-dashboard/
 |   |   |-- frontend_lts.py
 |   |   `-- serve_dist_proxy.js
 |   |-- start_launcher_linux.sh
-|   `-- start_launcher_windows.bat
+|   |-- start_launcher_windows.bat
+|   |-- start_linux.sh
+|   `-- start_windows.bat
 |-- .github/
 |   `-- workflows/
 |-- AI Info.md
@@ -302,6 +315,7 @@ Common read routes:
 - `GET /api/processes`
 - `GET /api/ports`
 - `GET /api/network/info`
+- `GET /api/terminal/sessions`
 - `GET /api/system/is-admin`
 - `GET /api/health`
 - `GET /api/auth/status`
@@ -316,6 +330,7 @@ Auth routes:
 Protected action routes:
 
 - `POST /api/commands/run`
+- `DELETE /api/terminal/sessions/<session_id>`
 - `GET /api/processes/<pid>/stop-preview`
 - `POST /api/processes/<pid>/kill`
 - `GET /api/port/<port>/stop-preview`

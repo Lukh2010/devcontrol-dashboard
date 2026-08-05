@@ -186,6 +186,22 @@ class TerminalSessionManager:
         """Return the number of active terminal sessions."""
         return len(self.sessions)
 
+    def list_sessions(self) -> list[dict]:
+        """Return metadata for all active terminal sessions."""
+        sessions_list = []
+        for session_id, session in list(self.sessions.items()):
+            uptime = round(time.time() - getattr(session, "start_time", time.time()), 2)
+            pid = session.process.pid if getattr(session, "process", None) and hasattr(session.process, "pid") else None
+            sessions_list.append({
+                "session_id": session_id,
+                "working_dir": session.working_dir,
+                "is_running": session.is_running,
+                "uptime_seconds": uptime,
+                "pid": pid,
+                "confirmation_pending": getattr(session, "confirmation_pending", False),
+            })
+        return sessions_list
+
     async def cleanup_sessions(self):
         """Clean up inactive terminal sessions."""
         for session_id, session in list(self.sessions.items()):

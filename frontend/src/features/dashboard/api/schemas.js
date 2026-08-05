@@ -200,3 +200,18 @@ export const streamNetworkSnapshotSchema = z.object({
   network_info: networkInfoSchema.optional(),
   timestamp: z.number().optional()
 });
+
+export const terminalSessionInfoSchema = z.object({
+  session_id: z.string(),
+  working_dir: z.string(),
+  is_running: z.boolean(),
+  uptime_seconds: z.number(),
+  pid: z.number().nullable().optional(),
+  confirmation_pending: z.boolean().optional()
+}).passthrough();
+
+export const terminalSessionsResponseSchema = z.object({
+  sessions: z.array(terminalSessionInfoSchema),
+  count: z.number(),
+  max_sessions: z.number()
+});

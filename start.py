@@ -74,34 +74,33 @@ class DevControlStarter:
             print("[ERROR] requirements.txt not found in backend directory")
             return False
 
+        base_cmd = [sys.executable, "-m", "pip", "install", "-r", str(requirements_file)]
         try:
-            import flask  # noqa: F401
-            import flask_cors  # noqa: F401
-            import psutil  # noqa: F401
-            import websockets  # noqa: F401
-            print("[OK] Backend dependencies already satisfied")
-            return True
-        except ImportError:
-            pass
-
-        strategies = [
-            [sys.executable, "-m", "pip", "install", "-r", str(requirements_file)],
-            [sys.executable, "-m", "pip", "install", "--user", "-r", str(requirements_file)],
-        ]
-        if os.name != "nt":
-            strategies.append([sys.executable, "-m", "pip", "install", "--break-system-packages", "-r", str(requirements_file)])
-            strategies.append([sys.executable, "-m", "pip", "install", "--user", "--break-system-packages", "-r", str(requirements_file)])
-
-        for cmd in strategies:
-            try:
-                subprocess.run(cmd, check=True, cwd=self.backend_dir)
-                print("[OK] Backend dependencies installed automatically")
+            result = subprocess.run(
+                base_cmd,
+                cwd=self.backend_dir,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                print("[OK] Backend dependencies installed")
                 return True
-            except subprocess.CalledProcessError:
-                continue
 
-        print("[ERROR] Failed to install backend dependencies automatically")
-        return False
+            if "externally-managed-environment" in (result.stderr or "") or "externally-managed-environment" in (result.stdout or ""):
+                print("[INFO] Externally managed environment detected. Retrying with --break-system-packages...")
+                subprocess.run(
+                    base_cmd + ["--break-system-packages"],
+                    check=True,
+                    cwd=self.backend_dir,
+                )
+                print("[OK] Backend dependencies installed")
+                return True
+
+            print(f"[ERROR] Failed to install backend dependencies: {result.stderr or result.stdout}")
+            return False
+        except Exception as exc:
+            print(f"[ERROR] Failed to install backend dependencies: {exc}")
+            return False
 
     def install_frontend_deps(self):
         print("\n[INFO] Installing frontend dependencies...")

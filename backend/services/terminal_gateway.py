@@ -257,3 +257,36 @@ class TerminalGatewayService:
             "session_count": self.terminal_manager.get_session_count(),
             "max_sessions": self.max_sessions,
         }
+
+    def list_sessions(self) -> list[dict]:
+        """Return list of active terminal sessions."""
+        return self.terminal_manager.list_sessions()
+
+    def terminate_session(self, session_id: str) -> tuple[dict, int]:
+        """Terminate a specific terminal session."""
+        session = self.terminal_manager.sessions.get(session_id)
+        if not session:
+            return {"error": f"Terminal session '{session_id}' not found"}, 404
+
+        try:
+            session.is_running = False
+            if session.process and hasattr(session.process, "terminate"):
+                try:
+                    session.process.terminate()
+                except Exception:
+                    pass
+            self.terminal_manager.sessions.pop(session_id, None)
+
+            self._publish_terminal_state(
+                "terminated",
+                message=f"Terminal session '{session_id}' terminated",
+                severity="warning",
+                session_id=session_id,
+            )
+            return {
+                "message": f"Successfully terminated terminal session '{session_id}'",
+                "session_id": session_id,
+                "status": "terminated"
+            }, 200
+        except Exception as exc:
+            return {"error": f"Failed to terminate terminal session: {exc}"}, 500

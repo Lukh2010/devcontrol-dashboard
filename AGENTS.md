@@ -6,9 +6,7 @@ Danach lies zur Vertiefung:
 - AI Info.md (detaillierte Projekt-Struktur, Entry Points, Routes, SSE Contract, Security Rules, Gotchas, Testing, CI)
 - README.md (allgemeine Setup-Anleitung)
 
-Wichtige Einstiegspunkte immer berücksichtigen:
-- start.py (Zentrales CLI-Skript für install, run, stop)
-- tools/start_launcher_linux.sh + tools/start_launcher_windows.bat (Grafische Launcher)
+Wichtige Einstiegspunkte aus AI Info.md immer berücksichtigen:
 - backend/app.py + service_runtime.py
 - backend/services/*
 - backend/security.py + dashboard_pids.py + command_classifier.py
