@@ -121,7 +121,7 @@ class TerminalSession(TerminalCommandExecutorMixin):
                     "type": "command_blocked",
                     "command": command,
                     "reason": policy.reason,
-                    "description": policy.description,
+                    "description": policy.message,
                 })
                 return
 
@@ -134,7 +134,7 @@ class TerminalSession(TerminalCommandExecutorMixin):
                     "command": command,
                     "classification": policy.classification,
                     "reason": policy.reason,
-                    "description": policy.description,
+                    "description": policy.message,
                 })
                 return
 

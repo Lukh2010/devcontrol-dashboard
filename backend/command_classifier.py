@@ -30,6 +30,11 @@ class CommandPolicy:
     message: str
     requires_confirmation: bool
 
+    @property
+    def allowed(self) -> bool:
+        """Return True if the command is not blocked and can either run directly or await confirmation."""
+        return self.status != "blocked" and self.classification not in {"dangerous", "interactive"}
+
     def to_payload(self) -> dict[str, Any]:
         """Return a JSON-serializable payload for APIs and websocket messages."""
         return asdict(self)
