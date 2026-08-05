@@ -103,7 +103,14 @@ def test_terminal_handshake_rejects_when_session_limit_is_reached(monkeypatch):
     clear_security_state()
     event_bus = FakeEventBus()
     gateway = TerminalGatewayService(event_bus, max_sessions=1)
-    gateway.terminal_manager.sessions["existing"] = object()
+
+    class FakeSession:
+        is_running = True
+        process = None
+        class websocket:
+            open = True
+
+    gateway.terminal_manager.sessions["existing"] = FakeSession()
     websocket = FakeWebSocket()
 
     asyncio.run(gateway.handle_websocket(websocket, "/"))
