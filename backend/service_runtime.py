@@ -3,6 +3,7 @@ import threading
 
 from dashboard_pids import get_pid_file_status, register_dashboard_pid
 from services.action_executor import ActionExecutorService
+from services.audit_service import AuditService
 from services.live_update_hub import LiveUpdateHub
 from services.system_inventory_service import SystemInventoryService
 from services.telemetry_service import TelemetryCollectorService
@@ -13,7 +14,8 @@ class ServiceRuntime:
     """Wires service boundaries together for the current single-process deployment."""
 
     def __init__(self):
-        self.live_updates = LiveUpdateHub()
+        self.audit = AuditService()
+        self.live_updates = LiveUpdateHub(audit_service=self.audit)
         self.inventory = SystemInventoryService()
         self.telemetry = TelemetryCollectorService(self.live_updates, inventory_service=self.inventory)
         self.actions = ActionExecutorService(self.live_updates, inventory_service=self.inventory)

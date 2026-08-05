@@ -27,11 +27,12 @@ def to_sse(event):
 
 
 class LiveUpdateHub:
-    """Owns in-process live event publication and SSE subscriber fanout."""
+    """Owns in-process live event publication, audit recording, and SSE subscriber fanout."""
 
-    def __init__(self, subscriber_queue_size: int = 200, replay_buffer_size: int = 250):
+    def __init__(self, subscriber_queue_size: int = 200, replay_buffer_size: int = 250, audit_service=None):
         self.subscriber_queue_size = subscriber_queue_size
         self.replay_buffer_size = replay_buffer_size
+        self.audit_service = audit_service
         self._subscribers = {}
         self._event_ids = count(1)
         self._subscriber_ids = count(1)
@@ -39,6 +40,12 @@ class LiveUpdateHub:
         self._lock = threading.Lock()
 
     def publish(self, event_type, payload):
+        if event_type == "action" and self.audit_service:
+            try:
+                self.audit_service.record_action(payload)
+            except Exception as exc:
+                print(f"[WARN] LiveUpdateHub failed to record audit action: {exc}")
+
         event = {
             "id": next(self._event_ids),
             "type": event_type,

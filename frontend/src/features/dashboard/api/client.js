@@ -1,6 +1,7 @@
 import {
   apiErrorSchema,
   apiMessageSchema,
+  auditLogsResponseSchema,
   authSessionDeleteSchema,
   authSessionSchema,
   authStatusSchema,
@@ -101,24 +102,14 @@ export function createAuthSession(password) {
     headers: {
       'Content-Type': 'application/json'
     },
-    credentials: 'same-origin',
     body: JSON.stringify({ password })
   }, authSessionSchema);
 }
 
 export function deleteAuthSession() {
   return mutateJson('/api/auth/session', {
-    method: 'DELETE',
-    credentials: 'same-origin'
+    method: 'DELETE'
   }, authSessionDeleteSchema);
-}
-
-export function fetchSystemInfo() {
-  return getJson('/api/system/info', systemInfoSchema);
-}
-
-export function fetchSystemPerformance() {
-  return getJson('/api/system/performance', performanceSnapshotSchema);
 }
 
 export function fetchSystemAdmin() {
@@ -129,68 +120,52 @@ export function fetchHealth() {
   return getJson('/api/health', healthSchema);
 }
 
+export function fetchSystemInfo() {
+  return getJson('/api/system/info', systemInfoSchema);
+}
+
+export function fetchSystemPerformance() {
+  return getJson('/api/system/performance', performanceSnapshotSchema);
+}
+
 export function fetchProcesses(options = {}) {
-  return getJson(`/api/processes${buildSearchParams(options)}`, processesSchema);
+  const query = buildSearchParams({
+    search: options.search,
+    sort: options.sort,
+    limit: options.limit,
+    dashboard_only: options.dashboardOnly,
+    killable_only: options.killableOnly
+  });
+  return getJson(`/api/processes${query}`, processesSchema);
 }
 
 export function fetchPorts(options = {}) {
-  return getJson(`/api/ports${buildSearchParams(options)}`, portsSchema);
+  const query = buildSearchParams({
+    search: options.search,
+    sort: options.sort,
+    limit: options.limit,
+    dashboard_only: options.dashboardOnly,
+    killable_only: options.killableOnly
+  });
+  return getJson(`/api/ports${query}`, portsSchema);
 }
 
 export function fetchNetworkInfo() {
   return getJson('/api/network/info', networkInfoSchema);
 }
 
-export function systemInfoQueryOptions() {
-  return {
-    queryKey: dashboardQueryKeys.systemInfo,
-    queryFn: fetchSystemInfo
-  };
+export function executeCommand({ command, name, controlPassword }) {
+  return mutateJson('/api/commands/run', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-DevControl-Password': controlPassword || ''
+    },
+    body: JSON.stringify({ command, name })
+  }, apiMessageSchema);
 }
 
-export function systemPerformanceQueryOptions() {
-  return {
-    queryKey: dashboardQueryKeys.systemPerformance,
-    queryFn: fetchSystemPerformance
-  };
-}
-
-export function systemAdminQueryOptions() {
-  return {
-    queryKey: dashboardQueryKeys.systemAdmin,
-    queryFn: fetchSystemAdmin
-  };
-}
-
-export function healthQueryOptions() {
-  return {
-    queryKey: dashboardQueryKeys.health,
-    queryFn: fetchHealth
-  };
-}
-
-export function processesQueryOptions() {
-  return {
-    queryKey: dashboardQueryKeys.processes,
-    queryFn: () => fetchProcesses({ limit: 500 })
-  };
-}
-
-export function portsQueryOptions() {
-  return {
-    queryKey: dashboardQueryKeys.ports,
-    queryFn: () => fetchPorts({ limit: 500 })
-  };
-}
-
-export function networkInfoQueryOptions() {
-  return {
-    queryKey: dashboardQueryKeys.networkInfo,
-    queryFn: fetchNetworkInfo
-  };
-}
-
-export function killPort({ port, controlPassword, pid, protocol, localAddress }) {
+export function killProcessByPort({ port, controlPassword, pid, protocol, localAddress }) {
   const query = buildSearchParams({
     pid,
     protocol,
@@ -239,4 +214,15 @@ export function previewProcessStop({ pid, controlPassword }) {
       'X-DevControl-Password': controlPassword || ''
     }
   }, stopPreviewSchema);
+}
+
+export function fetchAuditLogs(options = {}) {
+  const query = buildSearchParams({
+    limit: options.limit,
+    offset: options.offset,
+    severity: options.severity,
+    action: options.action,
+    search: options.search
+  });
+  return getJson(`/api/audit/logs${query}`, auditLogsResponseSchema);
 }

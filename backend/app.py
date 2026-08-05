@@ -80,7 +80,6 @@ def _has_sensitive_telemetry_access() -> bool:
 
 
 def _mask_process_entry(process: dict) -> dict:
-    # Allow-list of safe fields
     allowed = {
         "pid", "name", "cpu_percent", "memory_mb", "status", 
         "parent_pid", "started_at", "inventory_source", 
@@ -93,7 +92,6 @@ def _mask_process_entry(process: dict) -> dict:
 
 
 def _mask_port_entry(port: dict) -> dict:
-    # Allow-list of safe fields
     allowed = {
         "port", "process_name", "pid", "status", "protocol", 
         "local_address", "state", "inventory_source", 
@@ -316,6 +314,49 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
             return jsonify(network_info)
         except Exception as exc:
             return _server_error("get_network_info", exc)
+
+    @app.route("/api/audit/logs")
+    def get_audit_logs():
+        rate_limit_error = check_rate_limit_or_response("stop_preview")
+        if rate_limit_error:
+            return rate_limit_error
+
+        try:
+            limit = _parse_limit(request.args.get("limit"), default=50) or 50
+            offset = _parse_positive_int(request.args.get("offset")) or 0
+            severity = request.args.get("severity")
+            action = request.args.get("action")
+            search = request.args.get("search")
+
+            result = runtime.audit.get_audit_logs(
+                limit=limit,
+                offset=offset,
+                severity=severity,
+                action=action,
+                search=search,
+            )
+
+            if not _has_sensitive_telemetry_access():
+                masked_logs = []
+                for entry in result["logs"]:
+                    item = dict(entry)
+                    if not item.get("requires_password", False):
+                        masked_logs.append(item)
+                    else:
+                        masked_logs.append({
+                            "id": item.get("id"),
+                            "timestamp": item.get("timestamp"),
+                            "action": item.get("action"),
+                            "status": "locked",
+                            "severity": "neutral",
+                            "message": "Protected action log entry (locked)",
+                            "sensitive_masked": True,
+                        })
+                result["logs"] = masked_logs
+
+            return jsonify(result)
+        except Exception as exc:
+            return _server_error("get_audit_logs", exc)
 
     @app.route("/api/processes/<int:pid>/kill", methods=["POST"])
     def kill_process(pid):

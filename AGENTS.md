@@ -44,6 +44,7 @@ Du arbeitest am DevControl Dashboard: einem lokalen Machine-Control-Panel.
   - Action executor
   - Terminal gateway (terminal_session.py)
   - In-memory live update hub
+  - Audit logger (services/audit_service.py)
 - Neue Features immer in `backend/services/` als separates Modul anlegen
 - Immer dashboard_pids.py und security.py respektieren (nur dashboard-owned PIDs/Ports killen!)
 
