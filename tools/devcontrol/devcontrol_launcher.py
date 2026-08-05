@@ -5,15 +5,29 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import socket
 import subprocess
 import sys
 import threading
-import tkinter as tk
 import webbrowser
-import re
 from pathlib import Path
-from tkinter import ttk
+
+try:
+    import tkinter as tk
+    from tkinter import ttk
+except (ImportError, ModuleNotFoundError) as exc:
+    print("[WARN] Tkinter GUI library is not installed on this system.")
+    print("[INFO] Automatically starting DevControl in CLI mode via start.py...")
+    print("=" * 50)
+    project_root = Path(__file__).resolve().parents[2]
+    start_script = project_root / "start.py"
+    try:
+        cmd = [sys.executable, str(start_script), "run"]
+        raise SystemExit(subprocess.call(cmd))
+    except Exception as launch_exc:
+        print(f"[ERROR] Failed to start DevControl: {launch_exc}")
+        sys.exit(1)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -80,18 +94,21 @@ class DevControlLauncher(tk.Tk):
         except tk.TclError:
             pass
 
-        style.configure(".", font=("Segoe UI", 10), background="#f5f7fb", foreground="#162033")
+        ui_font = "Segoe UI" if os.name == "nt" else "DejaVu Sans"
+        ui_bold = "Segoe UI Semibold" if os.name == "nt" else "DejaVu Sans"
+
+        style.configure(".", font=(ui_font, 10), background="#f5f7fb", foreground="#162033")
         style.configure("Card.TFrame", background="#ffffff", relief="flat")
         style.configure("Header.TFrame", background="#f5f7fb")
-        style.configure("Title.TLabel", font=("Segoe UI Semibold", 26), background="#f5f7fb", foreground="#101828")
-        style.configure("Subtitle.TLabel", font=("Segoe UI", 11), background="#f5f7fb", foreground="#667085")
-        style.configure("Section.TLabel", font=("Segoe UI Semibold", 11), background="#ffffff", foreground="#101828")
+        style.configure("Title.TLabel", font=(ui_bold, 26), background="#f5f7fb", foreground="#101828")
+        style.configure("Subtitle.TLabel", font=(ui_font, 11), background="#f5f7fb", foreground="#667085")
+        style.configure("Section.TLabel", font=(ui_bold, 11), background="#ffffff", foreground="#101828")
         style.configure("Muted.TLabel", background="#ffffff", foreground="#667085")
-        style.configure("Status.TLabel", font=("Segoe UI Semibold", 10), background="#ffffff", foreground="#344054")
-        style.configure("Primary.TButton", font=("Segoe UI Semibold", 12), padding=(18, 12))
-        style.configure("Secondary.TButton", font=("Segoe UI Semibold", 10), padding=(12, 9))
-        style.configure("Advanced.TButton", font=("Segoe UI", 9), padding=(9, 7))
-        style.configure("Badge.TLabel", font=("Segoe UI Semibold", 9), padding=(10, 5), background="#eef2f7", foreground="#344054")
+        style.configure("Status.TLabel", font=(ui_bold, 10), background="#ffffff", foreground="#344054")
+        style.configure("Primary.TButton", font=(ui_bold, 12), padding=(18, 12))
+        style.configure("Secondary.TButton", font=(ui_bold, 10), padding=(12, 9))
+        style.configure("Advanced.TButton", font=(ui_font, 9), padding=(9, 7))
+        style.configure("Badge.TLabel", font=(ui_bold, 9), padding=(10, 5), background="#eef2f7", foreground="#344054")
 
     def _build_layout(self) -> None:
         root = ttk.Frame(self, padding=24, style="Header.TFrame")

@@ -65,6 +65,9 @@ function normalizeSettings(value) {
 
 function readStoredSettings() {
   try {
+    if (typeof window === 'undefined' || !window?.localStorage) {
+      return DEFAULT_SETTINGS;
+    }
     const rawSettings = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (!rawSettings) {
       return DEFAULT_SETTINGS;
@@ -89,8 +92,14 @@ export function SettingsProvider({ children }) {
   const [lastSavedAt, setLastSavedAt] = useState(null);
 
   useEffect(() => {
-    window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-    setLastSavedAt(Date.now());
+    try {
+      if (typeof window !== 'undefined' && window?.localStorage) {
+        window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+        setLastSavedAt(Date.now());
+      }
+    } catch {
+      // Ignore storage write errors
+    }
   }, [settings]);
 
   useEffect(() => {
@@ -119,8 +128,14 @@ export function SettingsProvider({ children }) {
   }, []);
 
   const clearLocalPreferences = useCallback(() => {
-    window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
-    window.localStorage.removeItem('devcontrol.activePanel');
+    try {
+      if (typeof window !== 'undefined' && window?.localStorage) {
+        window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
+        window.localStorage.removeItem('devcontrol.activePanel');
+      }
+    } catch {
+      // Ignore storage removal errors
+    }
     setSettings(DEFAULT_SETTINGS);
   }, []);
 

@@ -42,9 +42,13 @@ const PANEL_TITLES = {
 const PANEL_IDS = new Set(PANELS.map((panel) => panel.id));
 
 function resolveStoredPanel(defaultPanel) {
-  const storedPanel = window.localStorage.getItem(PANEL_STORAGE_KEY);
-  if (storedPanel && PANEL_IDS.has(storedPanel)) {
-    return storedPanel;
+  try {
+    const storedPanel = typeof window !== 'undefined' && window?.localStorage ? window.localStorage.getItem(PANEL_STORAGE_KEY) : null;
+    if (storedPanel && PANEL_IDS.has(storedPanel)) {
+      return storedPanel;
+    }
+  } catch (e) {
+    // Ignore storage access errors
   }
 
   return PANEL_IDS.has(defaultPanel) ? defaultPanel : 'overview';
@@ -160,7 +164,13 @@ function AppContent() {
   const authRetryAfter = authMutationError?.retryAfter ?? null;
 
   useEffect(() => {
-    window.localStorage.setItem(PANEL_STORAGE_KEY, activePanel);
+    try {
+      if (typeof window !== 'undefined' && window?.localStorage) {
+        window.localStorage.setItem(PANEL_STORAGE_KEY, activePanel);
+      }
+    } catch {
+      // Ignore storage write errors
+    }
   }, [activePanel]);
 
   useEffect(() => {

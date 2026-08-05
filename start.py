@@ -75,16 +75,33 @@ class DevControlStarter:
             return False
 
         try:
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", "-r", str(requirements_file)],
-                check=True,
-                cwd=self.backend_dir,
-            )
-            print("[OK] Backend dependencies installed")
+            import flask  # noqa: F401
+            import flask_cors  # noqa: F401
+            import psutil  # noqa: F401
+            import websockets  # noqa: F401
+            print("[OK] Backend dependencies already satisfied")
             return True
-        except subprocess.CalledProcessError as exc:
-            print(f"[ERROR] Failed to install backend dependencies: {exc}")
-            return False
+        except ImportError:
+            pass
+
+        strategies = [
+            [sys.executable, "-m", "pip", "install", "-r", str(requirements_file)],
+            [sys.executable, "-m", "pip", "install", "--user", "-r", str(requirements_file)],
+        ]
+        if os.name != "nt":
+            strategies.append([sys.executable, "-m", "pip", "install", "--break-system-packages", "-r", str(requirements_file)])
+            strategies.append([sys.executable, "-m", "pip", "install", "--user", "--break-system-packages", "-r", str(requirements_file)])
+
+        for cmd in strategies:
+            try:
+                subprocess.run(cmd, check=True, cwd=self.backend_dir)
+                print("[OK] Backend dependencies installed automatically")
+                return True
+            except subprocess.CalledProcessError:
+                continue
+
+        print("[ERROR] Failed to install backend dependencies automatically")
+        return False
 
     def install_frontend_deps(self):
         print("\n[INFO] Installing frontend dependencies...")
