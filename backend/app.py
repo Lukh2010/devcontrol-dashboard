@@ -367,6 +367,27 @@ def create_app(runtime: ServiceRuntime | None = None) -> Flask:
         except Exception as exc:
             return _server_error("get_health", exc)
 
+    @app.route("/api/terminal/sessions")
+    def get_terminal_sessions():
+        try:
+            sessions = runtime.terminal_gateway.list_sessions()
+            return jsonify({
+                "sessions": sessions,
+                "count": len(sessions),
+                "max_sessions": runtime.terminal_gateway.max_sessions,
+            })
+        except Exception as exc:
+            return _server_error("get_terminal_sessions", exc)
+
+    @app.route("/api/terminal/sessions/<session_id>", methods=["DELETE"])
+    def terminate_terminal_session(session_id):
+        auth_error = require_control_password("process_kill")
+        if auth_error:
+            return auth_error
+
+        payload, status = runtime.terminal_gateway.terminate_session(session_id)
+        return jsonify(payload), status
+
     @app.route("/api/events/stream")
     def stream_events():
         sensitive_access = _has_sensitive_telemetry_access()

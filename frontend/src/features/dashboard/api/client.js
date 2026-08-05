@@ -12,7 +12,8 @@ import {
   processesSchema,
   stopPreviewSchema,
   systemAdminSchema,
-  systemInfoSchema
+  systemInfoSchema,
+  terminalSessionsResponseSchema
 } from './schemas';
 
 export class ApiRequestError extends Error {
@@ -239,4 +240,17 @@ export function previewProcessStop({ pid, controlPassword }) {
       'X-DevControl-Password': controlPassword || ''
     }
   }, stopPreviewSchema);
+}
+
+export function fetchTerminalSessions() {
+  return getJson('/api/terminal/sessions', terminalSessionsResponseSchema);
+}
+
+export function terminateTerminalSession({ sessionId, controlPassword }) {
+  return mutateJson(`/api/terminal/sessions/${sessionId}`, {
+    method: 'DELETE',
+    headers: {
+      'X-DevControl-Password': controlPassword || ''
+    }
+  }, apiMessageSchema);
 }
