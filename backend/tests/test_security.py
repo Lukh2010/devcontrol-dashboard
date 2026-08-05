@@ -134,7 +134,7 @@ def test_auth_session_locks_out_after_repeated_failures(monkeypatch):
     app = create_app(FakeRuntime())
     client = app.test_client()
 
-    for _ in range(4):
+    for _ in range(8):
         response = client.post("/api/auth/session", json={"password": "wrong-password"})
         assert response.status_code == 401
 
@@ -150,11 +150,11 @@ def test_auth_session_rate_limit_ignores_spoofed_forwarded_for(monkeypatch):
     app = create_app(FakeRuntime())
     client = app.test_client()
 
-    for index in range(6):
+    for index in range(60):
         response = client.post(
             "/api/auth/session",
             json={"password": "secret-123"},
-            headers={"X-Forwarded-For": f"10.0.0.{index}"},
+            headers={"X-Forwarded-For": f"10.0.0.{index % 255}"},
         )
         assert response.status_code == 200
 
@@ -206,7 +206,7 @@ def test_commands_run_is_rate_limited(monkeypatch):
     client = app.test_client()
     headers = {"X-DevControl-Password": "secret-123"}
 
-    for _ in range(12):
+    for _ in range(600):
         response = client.post("/api/commands/run", json={"command": "echo hello"}, headers=headers)
         assert response.status_code == 200
 
@@ -222,7 +222,7 @@ def test_process_kill_is_rate_limited(monkeypatch):
     client = app.test_client()
     headers = {"X-DevControl-Password": "secret-123"}
 
-    for _ in range(10):
+    for _ in range(300):
         response = client.post("/api/processes/1234/kill", headers=headers)
         assert response.status_code == 200
 
@@ -238,7 +238,7 @@ def test_port_delete_is_rate_limited(monkeypatch):
     client = app.test_client()
     headers = {"X-DevControl-Password": "secret-123"}
 
-    for _ in range(10):
+    for _ in range(300):
         response = client.delete("/api/port/8080", headers=headers)
         assert response.status_code == 200
 

@@ -65,9 +65,8 @@ def test_terminal_handshake_rate_limited_includes_retry_and_requires_password(mo
     gateway = TerminalGatewayService(event_bus)
 
     client_ip = "127.0.0.1"
-    RATE_LIMIT_STATE[f"terminal_handshake:{client_ip}"] = [0.0]
     current_time = time.time()
-    RATE_LIMIT_STATE[f"terminal_handshake:{client_ip}"] = [current_time] * 6
+    RATE_LIMIT_STATE[f"terminal_handshake:{client_ip}"] = [current_time] * 60
 
     websocket = FakeWebSocket(remote_address=(client_ip, 12345))
     asyncio.run(gateway.handle_websocket(websocket, "/"))
@@ -89,7 +88,7 @@ def test_terminal_handshake_rate_limit_ignores_spoofed_forwarded_for(monkeypatch
     event_bus = FakeEventBus()
     gateway = TerminalGatewayService(event_bus)
     current_time = time.time()
-    RATE_LIMIT_STATE["terminal_handshake:127.0.0.1"] = [current_time] * 6
+    RATE_LIMIT_STATE["terminal_handshake:127.0.0.1"] = [current_time] * 60
 
     websocket = FakeWebSocket(headers={"X-Forwarded-For": "10.0.0.9"})
     asyncio.run(gateway.handle_websocket(websocket, "/"))
