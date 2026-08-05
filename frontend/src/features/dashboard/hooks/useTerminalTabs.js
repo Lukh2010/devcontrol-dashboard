@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-const MAX_TABS = 5;
+const MAX_TABS = 4;
 const TABS_STORAGE_KEY = 'devcontrol_terminal_tabs';
 const ACTIVE_TAB_STORAGE_KEY = 'devcontrol_terminal_active_tab';
 
