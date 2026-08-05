@@ -1,3 +1,68 @@
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+
+export const SETTINGS_STORAGE_KEY = 'devcontrol.settings.v1';
+
+export const DEFAULT_SETTINGS = {
+  refreshInterval: 'realtime',
+  defaultPanel: 'overview',
+  compactMode: false,
+  reducedAnimations: false,
+  theme: 'dark',
+  accentColor: 'teal',
+  fontScale: 'normal',
+  terminalAutoScroll: true,
+  terminalClearOnReconnect: false,
+  terminalConfirmDangerous: true,
+  terminalFontSize: 'normal',
+  terminalShowTimestamps: false,
+  sensitiveTelemetryMasking: true,
+  confirmDangerousActions: true,
+  hideSensitiveNetworkInfo: true,
+  lockSensitiveTabsOnStartup: true,
+  overviewLayout: 'balanced',
+  showAdvancedPanels: true,
+  showLiveStatsGraphs: true,
+  autoOpenLastVisitedTab: false
+};
+
+export const REFRESH_INTERVALS = {
+  realtime: 500,
+  '1s': 1000,
+  '2s': 2000,
+  '5s': 5000,
+  '10s': 10000
+};
+
+const VALID_VALUES = {
+  refreshInterval: Object.keys(REFRESH_INTERVALS),
+  defaultPanel: ['overview', 'ports', 'process-manager', 'commands', 'network', 'encryptions', 'settings'],
+  theme: ['dark', 'light', 'system'],
+  accentColor: ['teal', 'blue', 'green', 'violet', 'amber'],
+  fontScale: ['small', 'normal', 'large'],
+  terminalFontSize: ['small', 'normal', 'large'],
+  overviewLayout: ['balanced', 'compact', 'ops']
+};
+
+const SettingsContext = createContext(null);
+
+function normalizeSettings(value) {
+  const nextSettings = { ...DEFAULT_SETTINGS, ...(value && typeof value === 'object' ? value : {}) };
+
+  Object.entries(VALID_VALUES).forEach(([key, values]) => {
+    if (!values.includes(nextSettings[key])) {
+      nextSettings[key] = DEFAULT_SETTINGS[key];
+    }
+  });
+
+  Object.entries(DEFAULT_SETTINGS).forEach(([key, defaultValue]) => {
+    if (typeof defaultValue === 'boolean' && typeof nextSettings[key] !== 'boolean') {
+      nextSettings[key] = defaultValue;
+    }
+  });
+
+  return nextSettings;
+}
+
 function readStoredSettings() {
   try {
     if (typeof window === 'undefined' || !window?.localStorage) {
@@ -73,3 +138,29 @@ export function SettingsProvider({ children }) {
     }
     setSettings(DEFAULT_SETTINGS);
   }, []);
+
+  const refreshIntervalMs = REFRESH_INTERVALS[settings.refreshInterval] ?? 0;
+
+  const value = useMemo(() => ({
+    settings,
+    refreshIntervalMs,
+    lastSavedAt,
+    updateSetting,
+    resetSettings,
+    clearLocalPreferences
+  }), [clearLocalPreferences, lastSavedAt, refreshIntervalMs, resetSettings, settings, updateSetting]);
+
+  return (
+    <SettingsContext.Provider value={value}>
+      {children}
+    </SettingsContext.Provider>
+  );
+}
+
+export function useSettings() {
+  const context = useContext(SettingsContext);
+  if (!context) {
+    throw new Error('useSettings must be used within SettingsProvider');
+  }
+  return context;
+}
