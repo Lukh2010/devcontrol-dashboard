@@ -99,125 +99,40 @@ class TerminalSession(TerminalCommandExecutorMixin):
             try:
                 if self.process.returncode is None:
                     self.process.terminate()
-                    try:
-                        await asyncio.wait_for(self.process.wait(), timeout=2.0)
-                    except asyncio.TimeoutError:
-                        self.process.kill()
-            except Exception as exc:
-                print(f"Error terminating terminal process: {exc}")
-            finally:
-                self.process = None
-
-    async def execute_command(self, command: str):
-        """Evaluate, classify, and execute one shell command."""
-        command = command.strip()
-        if not command:
-            return
-
-        async with self.command_lock:
-            policy = self.classifier.evaluate_command(command)
-            if not policy.allowed:
-                await self.send_message({
-                    "type": "command_blocked",
-                    "command": command,
-                    "reason": policy.reason,
-                    "description": policy.message,
-                })
-                return
-
-            if policy.requires_confirmation:
-                self.pending_command = command
-                self.confirmation_pending = True
-                self.pending_classification = policy.classification
-                await self.send_message({
-                    "type": "command_confirmation_required",
-                    "command": command,
-                    "classification": policy.classification,
-                    "reason": policy.reason,
-                    "description": policy.message,
-                })
-                return
-
-            await self._run_approved_command(command, policy.classification)
-
-    async def confirm_pending_command(self, confirmed: bool):
-        """Execute or discard a command awaiting user confirmation."""
-        async with self.command_lock:
-            if not self.confirmation_pending or not self.pending_command:
-                await self.send_message({
-                    "type": "error",
-                    "message": "No command pending confirmation",
-                })
-                return
-
-            command = self.pending_command
-            classification = self.pending_classification
-            self.pending_command = ""
-            self.confirmation_pending = False
-            self.pending_classification = ""
-
-            if confirmed:
-                await self._run_approved_command(command, classification)
-            else:
-                await self.send_message({
-                    "type": "command_cancelled",
-                    "command": command,
-                })
-
-    async def interrupt_command(self):
-        """Interrupt any running foreground process."""
-        async with self.command_lock:
-            if self.process and self.process.returncode is None:
+                    await asyncio.wait_for(self.process.wait(), timeout=5)
+            except Exception:
                 try:
-                    self.process.terminate()
-                    await self.send_message({
-                        "type": "command_interrupted",
-                        "message": "Command execution interrupted",
-                    })
-                except Exception as exc:
-                    await self.send_message({
-                        "type": "error",
-                        "message": f"Failed to interrupt command: {exc}",
-                    })
-            else:
-                await self.send_message({
-                    "type": "info",
-                    "message": "No running command to interrupt",
-                })
+                    self.process.kill()
+                except Exception:
+                    pass
 
-    async def resize_terminal(self, cols: int, rows: int):
-        """Handle terminal window resizes."""
         await self.send_message({
-            "type": "resized",
-            "cols": cols,
-            "rows": rows,
+            "type": "session_closed",
+            "message": "Terminal session closed",
+            "duration": time.time() - self.start_time,
         })
 
 
 class TerminalSessionManager:
-    """Manages active terminal WebSocket sessions."""
+    """Routes websocket protocol messages to the right terminal session."""
 
     def __init__(self):
         self.sessions: Dict[str, TerminalSession] = {}
         self.classifier = CommandClassifier()
 
-    async def create_session(
-        self,
-        websocket: WebSocketServerProtocol,
-        working_dir: str | None = None,
-    ) -> str:
-        """Create and register a new terminal session."""
+    async def create_session(self, websocket: WebSocketServerProtocol, working_dir: str | None = None) -> str:
+        """Create a new terminal session."""
         session_id = str(uuid.uuid4())
         session = TerminalSession(session_id, websocket, working_dir)
         self.sessions[session_id] = session
+
         await session.start_session()
         return session_id
 
     async def handle_message(self, session_id: str, message: Dict[str, Any]):
-        """Route incoming WebSocket messages to the session owner."""
+        """Handle one inbound WebSocket message for a terminal session."""
         session = self.sessions.get(session_id)
         if not session:
-            print(f"Warning: Session {session_id} not found")
             return
 
         message_type = message.get("type")
