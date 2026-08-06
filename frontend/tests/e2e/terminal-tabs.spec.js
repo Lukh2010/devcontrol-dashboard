@@ -2,6 +2,21 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Terminal Tabs E2E Suite', () => {
   test('opens terminal and enforces max 4 tabs limit', async ({ page }) => {
+    await page.route('**/api/**', async (route) => {
+      const url = route.request().url();
+      if (url.includes('/api/auth/status')) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ enabled: false, session_active: true }) });
+      } else if (url.includes('/api/system/info')) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ platform: 'Linux', hostname: 'local-test-box' }) });
+      } else if (url.includes('/api/system/performance')) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ cpu_percent: 10, memory: { percent: 20 } }) });
+      } else if (url.includes('/api/health')) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ api: { ready: true }, terminal: { thread_alive: true } }) });
+      } else {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
+      }
+    });
+
     await page.goto('/');
 
     const terminalTabBtn = page.getByRole('button', { name: 'Terminal', exact: true });
