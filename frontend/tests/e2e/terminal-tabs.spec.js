@@ -8,7 +8,9 @@ test.describe('Terminal Tabs E2E Suite', () => {
         window.localStorage.setItem('devcontrol.settings.v1', JSON.stringify({
           lockSensitiveTabsOnStartup: false
         }));
-      } catch {}
+      } catch {
+        // storage fallback
+      }
     });
 
     await page.route('**/api/**', async (route) => {
