@@ -12,44 +12,62 @@ function DashboardNavigation({
   streamBadge
 }) {
   return (
-    <section className="panel nav-panel">
-      <div className="panel-header compact-header">
-        <div>
-          <h2 className="panel-title">{panelMeta.title}</h2>
-          <p className="panel-subtitle">{panelMeta.subtitle}</p>
+    <header className="panel nav-panel-apple">
+      <div className="nav-apple-top">
+        <div className="nav-apple-brand">
+          <span className="brand-dot" aria-hidden="true" />
+          <h1 className="nav-apple-title">DevControl</h1>
+          <span className="nav-apple-divider" aria-hidden="true">/</span>
+          <span className="nav-apple-active-name">{panelMeta.title}</span>
         </div>
-        <div className="chip-row">
-          <span className={`status-badge ${streamBadge.tone}`}>{streamBadge.label}</span>
-          <span className={`status-badge ${isAdmin ? 'status-success' : 'status-warning'}`}>
-            {isAdmin ? 'Admin' : 'User mode'}
+
+        <div className="nav-apple-controls">
+          <div className="status-pill-group">
+            <span className={`status-dot-inline ${streamBadge.tone}`} />
+            <span className="status-pill-text">{streamBadge.label}</span>
+          </div>
+
+          <span className={`status-tag ${isAdmin ? 'admin' : 'user'}`}>
+            {isAdmin ? 'Admin' : 'User'}
           </span>
-          <button className="ghost-button compact-action-button" type="button" onClick={() => { void onRefreshAll(); }}>
-            <RefreshCw size={16} />
-            Refresh all
+
+          <button
+            className="apple-icon-button"
+            type="button"
+            onClick={() => { void onRefreshAll(); }}
+            title="Refresh dashboard data"
+          >
+            <RefreshCw size={14} />
           </button>
         </div>
       </div>
 
-      <div className="panel-body">
-        <nav className="nav-grid" aria-label="Dashboard navigation">
-          {panels.map(({ id, label, icon: Icon }) => (
-            <motion.button
-              key={id}
-              type="button"
-              className={`nav-card ${activePanel === id ? 'active' : ''}`}
-              onClick={() => setActivePanel(id)}
-              whileHover={{ y: -2 }}
-              whileTap={{ scale: 0.99 }}
-            >
-              <span className="panel-icon nav-icon">
-                <Icon size={16} />
-              </span>
-              <span className="nav-card-label">{label}</span>
-            </motion.button>
-          ))}
+      <div className="nav-apple-tabs-wrapper">
+        <nav className="nav-apple-tabs" aria-label="Main navigation">
+          {panels.map(({ id, label, icon: Icon }) => {
+            const isActive = activePanel === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`nav-apple-tab ${isActive ? 'active' : ''}`}
+                onClick={() => setActivePanel(id)}
+              >
+                {isActive && (
+                  <motion.div
+                    className="nav-apple-tab-bg"
+                    layoutId="activeTabIndicator"
+                    transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+                  />
+                )}
+                <Icon size={15} className="nav-apple-tab-icon" />
+                <span className="nav-apple-tab-label">{label}</span>
+              </button>
+            );
+          })}
         </nav>
       </div>
-    </section>
+    </header>
   );
 }
 
