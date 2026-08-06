@@ -175,17 +175,12 @@ class DevControlLauncher(tk.Tk):
         self.advanced_toggle.grid(row=0, column=0, sticky="w")
 
         self.advanced_frame = ttk.Frame(wrapper, padding=14, style="Card.TFrame")
-        for column in range(4):
+        for column in range(3):
             self.advanced_frame.columnconfigure(column, weight=1)
 
         buttons = [
-            ("Install Dependencies", "install", [sys.executable, str(START_SCRIPT), "install"], PROJECT_ROOT, False),
             ("Start Backend Only", "backend-only", [sys.executable, "app.py"], BACKEND_DIR, True),
             ("Start Frontend Only", "frontend-only", [npm_command(), "run", "dev"], FRONTEND_DIR, True),
-            ("Build Frontend", "build-frontend", [npm_command(), "run", "build"], FRONTEND_DIR, False),
-            ("Run Frontend Tests", "frontend-tests", [npm_command(), "run", "test"], FRONTEND_DIR, False),
-            ("Run Frontend E2E", "frontend-e2e", [npm_command(), "run", "test:e2e"], FRONTEND_DIR, False),
-            ("Run Backend Tests", "backend-tests", [sys.executable, "-m", "pytest"], BACKEND_DIR, False),
             ("Stop DevControl", "advanced-stop", [sys.executable, str(START_SCRIPT), "stop"], PROJECT_ROOT, False),
         ]
 
@@ -196,7 +191,7 @@ class DevControlLauncher(tk.Tk):
                 style="Advanced.TButton",
                 command=lambda k=key, c=command, d=cwd, r=keep_ref: self.run_command(k, c, d, keep_ref=r),
             )
-            button.grid(row=index // 4, column=index % 4, sticky="ew", padx=4, pady=4)
+            button.grid(row=0, column=index, sticky="ew", padx=4, pady=4)
             self.command_buttons[key] = button
 
     def _build_logs(self, root: ttk.Frame) -> None:
