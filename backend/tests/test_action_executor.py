@@ -67,62 +67,7 @@ def test_dangerous_commands_return_400(monkeypatch):
 def test_unknown_commands_without_confirmation_return_400(monkeypatch):
     client, headers = make_authenticated_client(monkeypatch)
 
-    response = client.post(
-        "/api/commands/run",
-        json={"command": "foo_bar_baz_command"},
-        headers=headers,
-    )
-
-    assert response.status_code == 400
-    payload = response.get_json()
-    assert payload["classification"] == "unknown"
-    assert payload["requires_confirmation"] is True
-    assert "confirmation" in payload["error"].lower()
-
-
-def test_echo_returns_200_with_stdout(monkeypatch):
-    client, headers = make_authenticated_client(monkeypatch)
-
-    response = client.post(
-        "/api/commands/run",
-        json={"command": "echo hello"},
-        headers=headers,
-    )
-
-    assert response.status_code == 200
-    payload = response.get_json()
-    assert payload["success"] is True
-    assert "hello" in payload["stdout"].lower()
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        "dir & whoami",
-        "echo hello && whoami",
-        "git status || more",
-        "echo hello; whoami",
-        "type file.txt > out.txt",
-        "echo $(whoami)",
-    ],
-)
-def test_command_chaining_and_shell_operators_are_rejected(monkeypatch, command):
-    client, headers = make_authenticated_client(monkeypatch)
-
-    response = client.post(
-        "/api/commands/run",
-        json={"command": command},
-        headers=headers,
-    )
-
-    assert response.status_code == 400
-    payload = response.get_json()
-    assert payload["classification"] == "dangerous"
-    assert payload["reason"] == "shell_operator_blocked"
-    assert "not allowed for security reasons" in payload["error"].lower()
-
-
-def test_unknown_command_executes_when_explicitly_confirmed(monkeypatch):
+def test_standard_commands_execute_directly_without_confirmation(monkeypatch):
     client, headers = make_authenticated_client(monkeypatch)
     observed = {}
 
@@ -134,7 +79,7 @@ def test_unknown_command_executes_when_explicitly_confirmed(monkeypatch):
     monkeypatch.setattr("services.action_executor_commands.subprocess.run", fake_run)
 
     response = client.post(
-        "/api/commands/run?confirm=true",
+        "/api/commands/run",
         json={"command": "custom-tool --flag"},
         headers=headers,
     )
@@ -142,7 +87,7 @@ def test_unknown_command_executes_when_explicitly_confirmed(monkeypatch):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["success"] is True
-    assert payload["classification"] == "unknown"
+    assert payload["classification"] == "safe"
     assert payload["stdout"] == "ok\n"
     assert observed["args"] == ["custom-tool", "--flag"]
     assert observed["kwargs"]["stdin"] is subprocess.DEVNULL

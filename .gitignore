@@ -163,14 +163,6 @@ backend/pytest-cache-files-*/
 pytest-cache-files-*/
 .tox/
 htmlcov/
-frontend/src/test/
-frontend/tests/
-**/*.test.py
-**/*.test.js
-**/*.test.jsx
-**/*.spec.py
-**/*.spec.js
-**/*.spec.jsx
 frontend/test-results/
 frontend/playwright-report/
 frontend/blob-report/

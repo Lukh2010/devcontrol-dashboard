@@ -47,7 +47,7 @@ def test_terminal_windows_builtin_chain_with_single_ampersand_is_blocked():
     assert not any("confirm_command_required" in message for message in websocket.messages)
 
 
-def test_terminal_unknown_command_requires_confirmation_before_execution():
+def test_terminal_standard_command_executes_directly():
     websocket = FakeWebSocket()
     session = TerminalSession("test-session", websocket)
     executed = []
@@ -58,28 +58,7 @@ def test_terminal_unknown_command_requires_confirmation_before_execution():
     session._execute_command_internal = fake_execute
 
     asyncio.run(session.execute_command("custom-tool --flag"))
-    assert executed == []
-    assert any("confirm_command_required" in message for message in websocket.messages)
-
-    asyncio.run(session.confirm_pending_command(True))
-    assert executed == [("custom-tool --flag", "unknown")]
-
-
-def test_terminal_unknown_command_can_be_cancelled():
-    websocket = FakeWebSocket()
-    session = TerminalSession("test-session", websocket)
-    executed = []
-
-    async def fake_execute(command, classification):
-        executed.append((command, classification))
-
-    session._execute_command_internal = fake_execute
-
-    asyncio.run(session.execute_command("custom-tool --flag"))
-    asyncio.run(session.confirm_pending_command(False))
-
-    assert executed == []
-    assert any("confirm_command_cancelled" in message for message in websocket.messages)
+    assert executed == [("custom-tool --flag", "safe")]
 
 
 def test_terminal_can_return_backend_command_classification():
@@ -92,7 +71,6 @@ def test_terminal_can_return_backend_command_classification():
     }))
 
     assert any("command_classification" in message for message in websocket.messages)
-    assert any("confirmation_required" in message for message in websocket.messages)
 
 
 def test_terminal_windows_dir_builtin_runs_without_cmd(monkeypatch):

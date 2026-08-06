@@ -27,12 +27,12 @@ def test_interactive_commands_are_classified_as_interactive():
         assert classification == "interactive"
 
 
-def test_unknown_commands_are_classified_as_unknown():
+def test_standard_commands_are_classified_as_safe():
     classifier = CommandClassifier()
 
-    for command in ("foo_bar_baz_command", "custom-tool --flag"):
+    for command in ("foo_bar_baz_command", "custom-tool --flag", "cargo build", "make test"):
         classification, _ = classifier.classify_command(command)
-        assert classification == "unknown"
+        assert classification == "safe"
 
 
 @pytest.mark.parametrize(
@@ -45,24 +45,24 @@ def test_unknown_commands_are_classified_as_unknown():
         "lsbad",
     ],
 )
-def test_allowlist_does_not_match_command_substrings(command):
+def test_standard_developer_commands_run_without_confirmation(command):
     classifier = CommandClassifier()
 
     policy = classifier.evaluate_command(command)
 
-    assert policy.classification == "unknown"
-    assert policy.status == "confirmation_required"
-    assert policy.requires_confirmation is True
+    assert policy.classification == "safe"
+    assert policy.status == "allowed"
+    assert policy.requires_confirmation is False
 
 
-def test_command_policy_uses_confirmation_required_for_unknown_commands():
+def test_command_policy_allows_standard_commands_directly():
     classifier = CommandClassifier()
 
     policy = classifier.evaluate_command("custom-tool --flag")
 
-    assert policy.classification == "unknown"
-    assert policy.status == "confirmation_required"
-    assert policy.requires_confirmation is True
+    assert policy.classification == "safe"
+    assert policy.status == "allowed"
+    assert policy.requires_confirmation is False
 
 
 @pytest.mark.parametrize(
