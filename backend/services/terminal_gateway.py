@@ -26,7 +26,7 @@ from terminal_session import TerminalSessionManager
 class TerminalGatewayService:
     """Owns terminal websocket lifecycle and session routing."""
 
-    def __init__(self, live_updates, host: str = "127.0.0.1", port: int = 8003, max_sessions: int = 3):
+    def __init__(self, live_updates, host: str = "127.0.0.1", port: int = 8003, max_sessions: int = 20):
         self.live_updates = live_updates
         self.host = host
         self.port = port
