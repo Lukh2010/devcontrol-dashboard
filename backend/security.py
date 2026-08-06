@@ -17,44 +17,49 @@ FAILED_AUTH_STATE: dict[str, list[float]] = {}
 LOCKOUT_STATE: dict[str, float] = {}
 
 RATE_LIMIT_POLICIES = {
+    # Auth endpoints: keep failure lockouts strict to prevent brute-force,
+    # but allow plenty of normal attempts per minute
     "auth_validate": {
-        "limit": 8,
+        "limit": 120,
         "window_seconds": 60,
-        "failure_limit": 4,
+        "failure_limit": 8,
         "failure_window_seconds": 300,
         "lockout_seconds": 300,
     },
     "auth_session": {
-        "limit": 6,
+        "limit": 60,
         "window_seconds": 60,
-        "failure_limit": 4,
+        "failure_limit": 8,
         "failure_window_seconds": 300,
         "lockout_seconds": 300,
     },
+    # Normal developer usage — effectively unlimited for a single local user
     "commands_run": {
-        "limit": 12,
+        "limit": 600,
         "window_seconds": 60,
     },
     "process_kill": {
-        "limit": 10,
+        "limit": 300,
         "window_seconds": 60,
     },
     "port_delete": {
-        "limit": 10,
+        "limit": 300,
         "window_seconds": 60,
     },
     "stop_preview": {
-        "limit": 30,
+        "limit": 600,
         "window_seconds": 60,
     },
+    # Terminal WebSocket handshakes — 20 reconnects/min is plenty even with 5 tabs
     "terminal_handshake": {
-        "limit": 6,
+        "limit": 60,
         "window_seconds": 60,
-        "failure_limit": 4,
+        "failure_limit": 8,
         "failure_window_seconds": 300,
         "lockout_seconds": 300,
     },
 }
+
 
 
 def trust_proxy_headers() -> bool:

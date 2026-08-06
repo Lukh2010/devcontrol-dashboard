@@ -182,8 +182,32 @@ class TerminalSessionManager:
             await session.close_session()
             del self.sessions[session_id]
 
+    def _prune_stale_sessions(self):
+        """Remove sessions whose WebSocket has already disconnected.
+
+        This catches ghost sessions left behind when the browser drops a
+        connection abruptly (e.g. page reload) and the asyncio cleanup in
+        handle_websocket's ``finally`` block doesn't fire in time.
+        """
+        stale_ids = [
+            sid for sid, session in self.sessions.items()
+            if (
+                not session.is_running
+                or (hasattr(session.websocket, 'open') and not session.websocket.open)
+            )
+        ]
+        for sid in stale_ids:
+            session = self.sessions.pop(sid, None)
+            if session and session.process:
+                try:
+                    if session.process.returncode is None:
+                        session.process.terminate()
+                except Exception:
+                    pass
+
     def get_session_count(self) -> int:
         """Return the number of active terminal sessions."""
+        self._prune_stale_sessions()
         return len(self.sessions)
 
     def list_sessions(self) -> list[dict]:
