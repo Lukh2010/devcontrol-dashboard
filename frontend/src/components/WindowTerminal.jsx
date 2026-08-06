@@ -23,7 +23,9 @@ const TerminalTabContent = ({
   passwordProtectionEnabled,
   onAction,
   terminalSettings,
-  onSessionLimit
+  onSessionLimit,
+  isActive,
+  shouldConnect
 }) => {
   const {
     connected,
@@ -53,17 +55,20 @@ const TerminalTabContent = ({
     authUnlocked,
     passwordProtectionEnabled,
     onAction,
-    terminalSettings
+    terminalSettings,
+    shouldConnect
   });
 
-  // Notify parent when backend session limit is hit or cleared
+  // Notify parent when backend session limit is hit or cleared — only from the active tab
   React.useEffect(() => {
+    if (!isActive) return undefined;
     if (connectionState === 'session_limit') {
       onSessionLimit?.(true);
     } else if (connectionState === 'connected') {
       onSessionLimit?.(false);
     }
-  }, [connectionState, onSessionLimit]);
+    return undefined;
+  }, [connectionState, isActive, onSessionLimit]);
 
   const terminalStatus = connected
     ? { className: 'status-success', label: 'Connected' }
@@ -302,6 +307,17 @@ const WindowTerminal = ({
 }) => {
   const { tabs, activeTabId, setActiveTabId, addTab, closeTab, canAddTab } = useTerminalTabs();
   const [sessionLimitReached, setSessionLimitReached] = React.useState(false);
+  // Track which tab IDs have ever been activated so we can lazy-connect their WebSocket
+  const [activatedTabs, setActivatedTabs] = React.useState(() => new Set([activeTabId]));
+
+  React.useEffect(() => {
+    setActivatedTabs((prev) => {
+      if (prev.has(activeTabId)) return prev;
+      const next = new Set(prev);
+      next.add(activeTabId);
+      return next;
+    });
+  }, [activeTabId]);
 
   // Clear the session-limit flag whenever a tab is closed (slot freed)
   React.useEffect(() => {
@@ -389,20 +405,25 @@ const WindowTerminal = ({
           </div>
         </div>
 
-        {tabs.map((tab) => {
-          if (tab.id !== activeTabId) return null;
-          return (
-            <TerminalTabContent
-              key={tab.id}
-              tabId={tab.id}
-              authUnlocked={authUnlocked}
-              passwordProtectionEnabled={passwordProtectionEnabled}
-              onAction={onAction}
-              terminalSettings={terminalSettings}
-              onSessionLimit={setSessionLimitReached}
-            />
-          );
-        })}
+        {tabs.map((tab) => (
+          <div
+            key={tab.id}
+            style={{ display: activeTabId === tab.id ? 'block' : 'none' }}
+          >
+            {activatedTabs.has(tab.id) && (
+              <TerminalTabContent
+                tabId={tab.id}
+                authUnlocked={authUnlocked}
+                passwordProtectionEnabled={passwordProtectionEnabled}
+                onAction={onAction}
+                terminalSettings={terminalSettings}
+                onSessionLimit={setSessionLimitReached}
+                isActive={activeTabId === tab.id}
+                shouldConnect
+              />
+            )}
+          </div>
+        ))}
       </div>
     </motion.section>
   );

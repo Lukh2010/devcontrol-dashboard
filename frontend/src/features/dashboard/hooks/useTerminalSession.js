@@ -3,6 +3,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 const MAX_HISTORY = 50;
 const TERMINAL_PORT = 8003;
 
+const DEFAULT_COMPLETION_COMMANDS = [
+  'git status',
+  'git log -n 10',
+  'python --version',
+  'node --version',
+  'npm run dev',
+  'npm test',
+  'pip list',
+  'ls -la',
+  'dir',
+  'cd',
+  'pwd',
+  'cat',
+  'grep',
+  'ps',
+  'whoami',
+  'clear'
+];
+
 const EMPTY_COMMAND_SAFETY = {
   command: '',
   classification: 'empty',
@@ -29,25 +48,78 @@ function resolveTerminalHost() {
     : '127.0.0.1';
 }
 
+function readStoredTabOutput(tabId) {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const stored = window.localStorage.getItem(`devcontrol_terminal_output_${tabId}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) return parsed.slice(-200);
+      }
+    }
+  } catch {
+    // Ignore storage read error
+  }
+  return [];
+}
+
+function readStoredTabHistory(tabId) {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const stored = window.localStorage.getItem(`devcontrol_terminal_history_${tabId}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) return parsed.slice(-50);
+      }
+    }
+  } catch {
+    // Ignore storage read error
+  }
+  return [];
+}
+
 export function useTerminalSession({
+  tabId = 'tab-1',
   authUnlocked,
   passwordProtectionEnabled,
   onAction,
-  terminalSettings = {}
+  terminalSettings = {},
+  shouldConnect = true
 }) {
   const [connected, setConnected] = useState(false);
   const [connectionState, setConnectionState] = useState('idle');
   const [connectionMessage, setConnectionMessage] = useState('Waiting for terminal access.');
   const [retryUntil, setRetryUntil] = useState(null);
-  const [output, setOutput] = useState([]);
+  const [output, setOutput] = useState(() => readStoredTabOutput(tabId));
   const [currentCommand, setCurrentCommand] = useState('');
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] = useState(() => readStoredTabHistory(tabId));
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [safeSuggestions, setSafeSuggestions] = useState([]);
   const [confirmCommandPrompt, setConfirmCommandPrompt] = useState(null);
   const [workingDir, setWorkingDir] = useState('');
   const [copyState, setCopyState] = useState('idle');
   const [commandSafety, setCommandSafety] = useState(EMPTY_COMMAND_SAFETY);
+  const [completionCandidates, setCompletionCandidates] = useState([]);
+
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(`devcontrol_terminal_output_${tabId}`, JSON.stringify(output.slice(-200)));
+      }
+    } catch {
+      // Ignore storage write error
+    }
+  }, [output, tabId]);
+
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(`devcontrol_terminal_history_${tabId}`, JSON.stringify(history.slice(-50)));
+      }
+    } catch {
+      // Ignore storage write error
+    }
+  }, [history, tabId]);
 
   const outputEndRef = useRef(null);
   const wsRef = useRef(null);
@@ -343,6 +415,10 @@ export function useTerminalSession({
   }, [addOutput, terminalSettings.clearOnReconnect]);
 
   const connectWebSocket = useCallback(() => {
+    if (!shouldConnect) {
+      return;
+    }
+
     if (passwordProtectionEnabled && !authUnlocked) {
       setConnectionState('locked');
       setConnectionMessage('Unlock control access to start the protected terminal session.');
@@ -396,7 +472,7 @@ export function useTerminalSession({
       setConnectionMessage(`Failed to connect: ${error.message}`);
       scheduleReconnect(3000);
     }
-  }, [authUnlocked, closeSocket, handleMessage, passwordProtectionEnabled, scheduleReconnect]);
+  }, [authUnlocked, closeSocket, handleMessage, passwordProtectionEnabled, scheduleReconnect, shouldConnect]);
 
   useEffect(() => {
     connectWebSocketRef.current = connectWebSocket;
@@ -514,9 +590,43 @@ export function useTerminalSession({
     connectWebSocket();
   }, [authUnlocked, closeSocket, connectWebSocket, passwordProtectionEnabled]);
 
+  const applyCompletion = useCallback((candidate) => {
+    setCurrentCommand(candidate);
+    setCompletionCandidates([]);
+  }, []);
+
   const handleKeyDown = useCallback((event) => {
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      const inputTrimmed = currentCommand.toLowerCase().trim();
+      const allPool = Array.from(new Set([
+        ...DEFAULT_COMPLETION_COMMANDS,
+        ...safeSuggestions,
+        ...history.map((h) => h.command)
+      ]));
+
+      const matches = inputTrimmed
+        ? allPool.filter((cmd) => cmd.toLowerCase().startsWith(inputTrimmed))
+        : allPool.slice(0, 8);
+
+      if (matches.length === 1) {
+        setCurrentCommand(matches[0]);
+        setCompletionCandidates([]);
+      } else if (matches.length > 1) {
+        setCompletionCandidates(matches);
+      } else {
+        setCompletionCandidates([]);
+      }
+      return;
+    }
+
+    if (completionCandidates.length > 0 && event.key !== 'Tab') {
+      setCompletionCandidates([]);
+    }
+
     if (event.key === 'Enter') {
       sendCommand(currentCommand);
+      setCompletionCandidates([]);
       return;
     }
 
@@ -549,7 +659,7 @@ export function useTerminalSession({
       event.preventDefault();
       interruptCommand();
     }
-  }, [currentCommand, history, historyIndex, interruptCommand, sendCommand]);
+  }, [completionCandidates.length, currentCommand, history, historyIndex, interruptCommand, safeSuggestions, sendCommand]);
 
   return {
     connected,
@@ -566,6 +676,8 @@ export function useTerminalSession({
     copyState,
     outputEndRef,
     commandSafety,
+    completionCandidates,
+    applyCompletion,
     sendCommand,
     interruptCommand,
     confirmPendingCommand,

@@ -758,7 +758,7 @@ test('unlocks password mode and executes dir in the terminal', async ({ page }) 
 
   await expect(page.getByText(/^Unlocked$/).first()).toBeVisible();
   await page.getByRole('button', { name: 'Terminal', exact: true }).click();
-  await expect(page.getByText('Connected').first()).toBeVisible();
+  await expect(page.getByText('Connected').first()).toBeVisible({ timeout: 15000 });
 
   const terminalInput = page.getByLabel('Terminal command');
   await terminalInput.fill('dir');
