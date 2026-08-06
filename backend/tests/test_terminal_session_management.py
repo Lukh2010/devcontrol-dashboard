@@ -23,7 +23,9 @@ def test_get_terminal_sessions_api(client):
 
 
 def test_terminate_terminal_session_not_found(client):
-    response = client.delete("/api/terminal/sessions/non_existent_session_id")
+    import os
+    pwd = os.environ.get("DEVCONTROL_PASSWORD", "ci-password")
+    response = client.delete("/api/terminal/sessions/non_existent_session_id", headers={"X-DevControl-Password": pwd})
     assert response.status_code == 404
     data = response.get_json()
     assert "error" in data

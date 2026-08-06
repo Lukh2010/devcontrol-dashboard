@@ -4,10 +4,12 @@ on:
   push:
     branches:
       - main
+      - testing
       - develop
   pull_request:
     branches:
       - main
+      - testing
       - develop
   workflow_dispatch:
 
@@ -72,6 +74,7 @@ jobs:
           - "3.10"
           - "3.11"
           - "3.12"
+          - "3.13"
 
     steps:
       - name: Checkout
@@ -533,7 +536,7 @@ jobs:
 
       - name: Install Playwright browsers
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps
 
       - name: Run Playwright
         working-directory: frontend
@@ -667,3 +670,28 @@ jobs:
             echo "- Status: ${{ job.status }}"
             echo "- Tooling: Trivy filesystem scan + SARIF upload"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  ci-gate:
+    name: enterprise-ci-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - workflow-lint
+      - backend-tests
+      - backend-smoke
+      - frontend-lint
+      - frontend-build
+      - frontend-unit
+      - frontend-e2e
+      - security-scan
+    permissions:
+      contents: read
+
+    steps:
+      - name: Verify enterprise quality gate
+        run: |
+          echo "======================================================="
+          echo "Enterprise Quality Gate Verification: PASSED"
+          echo "All static analysis, multi-version matrices, security scans, and E2E suites succeeded."
+          echo "======================================================="
+
