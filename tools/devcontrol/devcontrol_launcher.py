@@ -174,25 +174,43 @@ class DevControlLauncher(tk.Tk):
         self.advanced_toggle = ttk.Button(wrapper, text="Advanced ▸", style="Secondary.TButton", command=self.toggle_advanced)
         self.advanced_toggle.grid(row=0, column=0, sticky="w")
 
-        self.advanced_frame = ttk.Frame(wrapper, padding=14, style="Card.TFrame")
-        for column in range(3):
+        for column in range(5):
             self.advanced_frame.columnconfigure(column, weight=1)
 
-        buttons = [
-            ("Start Backend Only", "backend-only", [sys.executable, "app.py"], BACKEND_DIR, True),
-            ("Start Frontend Only", "frontend-only", [npm_command(), "run", "dev"], FRONTEND_DIR, True),
-            ("Stop DevControl", "advanced-stop", [sys.executable, str(START_SCRIPT), "stop"], PROJECT_ROOT, False),
-        ]
+        ttk.Button(
+            self.advanced_frame,
+            text="Start Backend Only",
+            style="Advanced.TButton",
+            command=lambda: self.run_command("backend-only", [sys.executable, "app.py"], BACKEND_DIR, keep_ref=True),
+        ).grid(row=0, column=0, sticky="ew", padx=4, pady=4)
 
-        for index, (text, key, command, cwd, keep_ref) in enumerate(buttons):
-            button = ttk.Button(
-                self.advanced_frame,
-                text=text,
-                style="Advanced.TButton",
-                command=lambda k=key, c=command, d=cwd, r=keep_ref: self.run_command(k, c, d, keep_ref=r),
-            )
-            button.grid(row=0, column=index, sticky="ew", padx=4, pady=4)
-            self.command_buttons[key] = button
+        ttk.Button(
+            self.advanced_frame,
+            text="Start Frontend Only",
+            style="Advanced.TButton",
+            command=lambda: self.run_command("frontend-only", [npm_command(), "run", "dev"], FRONTEND_DIR, keep_ref=True),
+        ).grid(row=0, column=1, sticky="ew", padx=4, pady=4)
+
+        ttk.Button(
+            self.advanced_frame,
+            text="Kill Backend",
+            style="Advanced.TButton",
+            command=self.kill_backend,
+        ).grid(row=0, column=2, sticky="ew", padx=4, pady=4)
+
+        ttk.Button(
+            self.advanced_frame,
+            text="Kill Frontend",
+            style="Advanced.TButton",
+            command=self.kill_frontend,
+        ).grid(row=0, column=3, sticky="ew", padx=4, pady=4)
+
+        ttk.Button(
+            self.advanced_frame,
+            text="Stop DevControl",
+            style="Advanced.TButton",
+            command=self.stop_devcontrol,
+        ).grid(row=0, column=4, sticky="ew", padx=4, pady=4)
 
     def _build_logs(self, root: ttk.Frame) -> None:
         card = ttk.Frame(root, padding=14, style="Card.TFrame")
@@ -348,6 +366,45 @@ class DevControlLauncher(tk.Tk):
         self.status_var.set("Stopped")
         self.log("Stopping DevControl through start.py stop...")
         self.run_command("stop", [sys.executable, str(START_SCRIPT), "stop"], PROJECT_ROOT, keep_ref=False)
+
+    def kill_backend(self) -> None:
+        self.log("Killing Backend process (port 8000)...")
+        if "backend-only" in self.processes:
+            try:
+                self.processes["backend-only"].kill()
+            except Exception:
+                pass
+            del self.processes["backend-only"]
+
+        self._kill_port_listeners(8000)
+        self.badge_vars["backend"].set("Stopped")
+        self.log("Backend termination signal sent.")
+
+    def kill_frontend(self) -> None:
+        self.log("Killing Frontend process (port 3000)...")
+        if "frontend-only" in self.processes:
+            try:
+                self.processes["frontend-only"].kill()
+            except Exception:
+                pass
+            del self.processes["frontend-only"]
+
+        self._kill_port_listeners(3000)
+        self.badge_vars["frontend"].set("Stopped")
+        self.log("Frontend termination signal sent.")
+
+    def _kill_port_listeners(self, port: int) -> None:
+        try:
+            import psutil
+            for conn in psutil.net_connections(kind="tcp"):
+                if conn.laddr and conn.laddr.port == port and conn.pid:
+                    try:
+                        proc = psutil.Process(conn.pid)
+                        proc.kill()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        pass
+        except Exception as exc:
+            self.log(f"Port kill for {port}: {exc}")
 
     def open_dashboard(self) -> None:
         webbrowser.open(DASHBOARD_URL)
