@@ -174,6 +174,7 @@ class DevControlLauncher(tk.Tk):
         self.advanced_toggle = ttk.Button(wrapper, text="Advanced ▸", style="Secondary.TButton", command=self.toggle_advanced)
         self.advanced_toggle.grid(row=0, column=0, sticky="w")
 
+        self.advanced_frame = ttk.Frame(wrapper, padding=14, style="Card.TFrame")
         for column in range(5):
             self.advanced_frame.columnconfigure(column, weight=1)
 
