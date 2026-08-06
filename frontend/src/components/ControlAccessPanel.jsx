@@ -1,13 +1,5 @@
 import React from 'react';
-import { ArrowUpRight, Cpu, HardDrive, LockKeyhole, Shield } from 'lucide-react';
-
-function formatBytesToGb(value) {
-  if (!value) {
-    return '...';
-  }
-
-  return `${Math.round(value / 1024 / 1024 / 1024)} GB`;
-}
+import { KeyRound, LockKeyhole, Server, Terminal, Wifi } from 'lucide-react';
 
 function ControlAccessPanel({
   authBadge,
@@ -23,30 +15,38 @@ function ControlAccessPanel({
   unlockControl,
   lockControl
 }) {
+  const systemEnv = currentStats.systemInfo
+    ? `${currentStats.systemInfo.platform || 'Linux'} ${currentStats.systemInfo.platform_release || ''}`.trim()
+    : 'Local Host';
+
+  const systemArch = currentStats.systemInfo?.architecture || 'x86_64';
+  const apiStatus = currentStats.health?.api?.ready ? '127.0.0.1:8000' : 'Offline';
+  const terminalStatus = currentStats.health?.terminal?.thread_alive ? '127.0.0.1:8003' : 'Starting';
+
   const quickStats = [
     {
-      label: 'Host',
-      value: currentStats.systemInfo?.hostname || 'Loading',
-      hint: currentStats.systemInfo?.platform || 'Waiting',
-      icon: Shield
+      label: 'Platform',
+      value: systemEnv,
+      hint: systemArch,
+      icon: Server
     },
     {
-      label: 'Memory',
-      value: formatBytesToGb(currentStats.systemInfo?.memory_total),
-      hint: currentStats.performanceData ? `${Math.round(currentStats.performanceData.memory.percent)}% used` : 'Waiting',
-      icon: HardDrive
+      label: 'API Server',
+      value: apiStatus,
+      hint: 'REST & SSE',
+      icon: Wifi
     },
     {
-      label: 'Processes',
-      value: String(currentStats.processes?.length || 0),
-      hint: currentStats.processes?.[0] ? currentStats.processes[0].name : 'No sample',
-      icon: Cpu
+      label: 'Terminal WS',
+      value: terminalStatus,
+      hint: 'WebSocket 8003',
+      icon: Terminal
     },
     {
-      label: 'Ports',
-      value: String(currentStats.ports?.length || 0),
-      hint: currentStats.networkInfo?.default_gateway || 'No gateway',
-      icon: ArrowUpRight
+      label: 'Security Mode',
+      value: authUnlocked ? 'Unlocked' : 'Protected',
+      hint: passwordProtectionEnabled ? 'Gated actions' : 'No password',
+      icon: KeyRound
     }
   ];
 
