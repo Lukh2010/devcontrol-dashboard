@@ -19,7 +19,7 @@ test.describe('Terminal Tabs E2E Suite', () => {
 
     await page.goto('/');
 
-    const terminalTabBtn = page.getByRole('button', { name: 'Terminal', exact: true });
+    const terminalTabBtn = page.locator('button', { hasText: 'Terminal' }).first();
     await expect(terminalTabBtn).toBeVisible();
     await terminalTabBtn.click();
 

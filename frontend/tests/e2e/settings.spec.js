@@ -19,7 +19,7 @@ test.describe('Settings Panel E2E Suite', () => {
 
     await page.goto('/');
 
-    const settingsBtn = page.getByRole('button', { name: 'Settings', exact: true });
+    const settingsBtn = page.locator('button', { hasText: 'Settings' }).first();
     await expect(settingsBtn).toBeVisible();
     await settingsBtn.click();
 
