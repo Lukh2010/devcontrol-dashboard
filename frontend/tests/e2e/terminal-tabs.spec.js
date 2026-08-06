@@ -4,7 +4,7 @@ test.describe('Terminal Tabs E2E Suite', () => {
   test('opens terminal and enforces max 4 tabs limit', async ({ page }) => {
     await page.addInitScript(() => {
       try {
-        window.localStorage.setItem('devcontrol.activePanel', 'terminal');
+        window.localStorage.setItem('devcontrol.activePanel', 'commands');
         window.localStorage.setItem('devcontrol.settings.v1', JSON.stringify({
           lockSensitiveTabsOnStartup: false
         }));

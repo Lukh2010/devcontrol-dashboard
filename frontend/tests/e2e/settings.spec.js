@@ -30,10 +30,13 @@ test.describe('Settings Panel E2E Suite', () => {
 
     await page.goto('/');
 
-    // Verify Settings panel header
-    await expect(page.getByText('Local UI and behavior preferences')).toBeVisible();
+    // Verify Settings panel header or section text
+    await expect(page.getByText('Refresh interval')).toBeVisible();
 
-    // Verify theme selector options exist
-    await expect(page.getByText('Theme Accent')).toBeVisible();
+    // Switch to Appearance tab and verify options
+    const appearanceBtn = page.getByRole('button', { name: 'Appearance' });
+    await expect(appearanceBtn).toBeVisible();
+    await appearanceBtn.click();
+    await expect(page.getByText('Accent color')).toBeVisible();
   });
 });
