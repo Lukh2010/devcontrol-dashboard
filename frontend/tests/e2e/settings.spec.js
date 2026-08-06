@@ -13,25 +13,49 @@ test.describe('Settings Panel E2E Suite', () => {
       }
     });
 
+    await page.route('**/api/events/stream', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        headers: {
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive'
+        },
+        body: [
+          'event: system_snapshot',
+          `data: ${JSON.stringify({
+            system_info: { platform: 'Linux', hostname: 'local-test-box' },
+            performance: { cpu_percent: 10, memory: { percent: 20 } },
+            is_admin: true
+          })}`,
+          '',
+          'event: heartbeat',
+          'data: {}',
+          ''
+        ].join('\n')
+      });
+    });
+
+    await page.route('**/api/auth/status', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ enabled: false, session_active: true }) });
+    });
+
+    await page.route('**/api/system/**', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ platform: 'Linux', hostname: 'local-test-box', is_admin: true }) });
+    });
+
+    await page.route('**/api/health', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ api: { ready: true }, terminal: { thread_alive: true }, password: { enabled: false } }) });
+    });
+
     await page.route('**/api/**', async (route) => {
-      const url = route.request().url();
-      if (url.includes('/api/auth/status')) {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ enabled: false, session_active: true }) });
-      } else if (url.includes('/api/system/info')) {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ platform: 'Linux', hostname: 'local-test-box' }) });
-      } else if (url.includes('/api/system/performance')) {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ cpu_percent: 10, memory: { percent: 20 } }) });
-      } else if (url.includes('/api/health')) {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ api: { ready: true }, terminal: { thread_alive: true }, password: { enabled: false } }) });
-      } else {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
     });
 
     await page.goto('/');
 
     // Verify Settings panel header or section text
-    await expect(page.getByText('Refresh interval')).toBeVisible();
+    await expect(page.getByText('Refresh interval')).toBeVisible({ timeout: 10000 });
 
     // Switch to Appearance tab and verify options
     const appearanceBtn = page.getByRole('button', { name: 'Appearance' });
