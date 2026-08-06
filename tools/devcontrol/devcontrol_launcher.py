@@ -64,8 +64,8 @@ class DevControlLauncher(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("DevControl Launcher")
-        self.geometry("1080x760")
-        self.minsize(980, 700)
+        self.geometry("1180x840")
+        self.minsize(980, 720)
 
         self.log_queue: queue.Queue[tuple[str, str]] = queue.Queue()
         self.processes: dict[str, subprocess.Popen[str]] = {}
@@ -210,17 +210,20 @@ class DevControlLauncher(tk.Tk):
         log_frame.grid(row=1, column=0, sticky="nsew")
         log_frame.rowconfigure(0, weight=1)
         log_frame.columnconfigure(0, weight=1)
+        log_font = ("Consolas", 11) if os.name == "nt" else ("DejaVu Sans Mono", 11)
         self.log_text = tk.Text(
             log_frame,
-            height=24,
+            height=28,
             wrap="word",
             bg="#0f172a",
-            fg="#e5e7eb",
-            insertbackground="#e5e7eb",
+            fg="#f1f5f9",
+            insertbackground="#f1f5f9",
             relief="flat",
-            padx=12,
-            pady=10,
-            font=("Cascadia Mono", 9),
+            padx=16,
+            pady=14,
+            spacing1=3,
+            spacing3=3,
+            font=log_font,
         )
         scrollbar = ttk.Scrollbar(log_frame, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scrollbar.set)
