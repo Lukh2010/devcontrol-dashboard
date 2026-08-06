@@ -15,19 +15,19 @@ function ControlAccessPanel({
   unlockControl,
   lockControl
 }) {
+  const hostname = currentStats.systemInfo?.hostname || 'Loading';
   const systemEnv = currentStats.systemInfo
     ? `${currentStats.systemInfo.platform || 'Linux'} ${currentStats.systemInfo.platform_release || ''}`.trim()
     : 'Local Host';
 
-  const systemArch = currentStats.systemInfo?.architecture || 'x86_64';
   const apiStatus = currentStats.health?.api?.ready ? '127.0.0.1:8000' : 'Offline';
   const terminalStatus = currentStats.health?.terminal?.thread_alive ? '127.0.0.1:8003' : 'Starting';
 
   const quickStats = [
     {
-      label: 'Platform',
-      value: systemEnv,
-      hint: systemArch,
+      label: 'Host',
+      value: hostname,
+      hint: systemEnv,
       icon: Server
     },
     {
