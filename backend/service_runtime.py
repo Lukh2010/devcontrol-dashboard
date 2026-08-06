@@ -18,9 +18,9 @@ class ServiceRuntime:
         self.telemetry = TelemetryCollectorService(self.live_updates, inventory_service=self.inventory)
         self.actions = ActionExecutorService(self.live_updates, inventory_service=self.inventory)
         try:
-            terminal_max_sessions = int(os.environ.get("DEVCONTROL_TERMINAL_MAX_SESSIONS", "5"))
+            terminal_max_sessions = int(os.environ.get("DEVCONTROL_TERMINAL_MAX_SESSIONS", "20"))
         except ValueError:
-            terminal_max_sessions = 5
+            terminal_max_sessions = 20
         self.terminal_gateway = TerminalGatewayService(self.live_updates, max_sessions=terminal_max_sessions)
 
     def start(self):
